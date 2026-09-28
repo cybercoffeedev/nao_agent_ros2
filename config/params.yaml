@@ -1,0 +1,4 @@
+tts_node:
+  ros__parameters:
+    input_topic: /voice/reply
+    output_topic: /speech

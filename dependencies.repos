@@ -3,3 +3,7 @@ repositories:
     type: git
     url: https://github.com/ros-naoqi/naoqi_driver2
     version: main
+  llama_ros:
+    type: git
+    url: https://github.com/mgonzs13/llama_ros
+    version: main

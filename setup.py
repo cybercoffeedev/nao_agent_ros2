@@ -23,7 +23,7 @@ setup (
     },
     entry_points={
         'console_scripts': [
-            'tts_node = nao_agent.tts_node:main'
+            'chat_bridge_node = nao_agent.chat_bridge_node:main'
         ],
     },
 )

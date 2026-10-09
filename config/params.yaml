@@ -1,4 +1,39 @@
-tts_node:
+# Single config for the whole stack (one file, two sections):
+# - `chat_bridge_node:` -> our bridge (topics, action, prompt text)
+# - `/**:`             -> llama_node (model, context, CPU, chat template)
+#   (`/**` applies to every node, so the model block works regardless of
+#   the namespace llama_node is launched in.)
+chat_bridge_node:
   ros__parameters:
-    input_topic: /voice/reply
-    output_topic: /speech
+    prompt_topic: "/prompt"
+    speech_topic: "/speech"
+    llama_action: "/naoqi_driver/generate_chat_completions"
+    system_prompt: "Jesteś robotem humanoidalnym NAO. Odpowiadaj krótko po polsku, maksymalnie 2 zdania. Nie używaj markdown ani emotikonów."
+    temp: 0.2
+    server_wait_sec: 5.0
+
+/**:
+  ros__parameters:
+    # Model parameters (Polish-first: Bielik-7B-Instruct, Mistral-based)
+    model:
+      repo: speakleash/Bielik-7B-Instruct-v0.1-GGUF
+      filename: bielik-7b-instruct-v0.1.Q4_K_M.gguf
+
+    # Context / inference parameters
+    context:
+      n_ctx: 2048
+      n_batch: 8
+      n_predict: 2048
+
+    # GPU / backend parameters
+    gpu:
+      n_gpu_layers: 0
+
+    # CPU parameters (tuned: 7B needs more than the upstream single thread)
+    cpu:
+      n_threads: 4
+
+    # Prompt & chat parameters (must match the model chat template:
+    # Bielik uses [INST]...[/INST])
+    prompt:
+      system_prompt_type: Mistral

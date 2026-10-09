@@ -34,6 +34,13 @@ chat_bridge_node:
       n_threads: 4
 
     # Prompt & chat parameters (must match the model chat template:
-    # Bielik uses [INST]...[/INST])
+    # Bielik uses [INST]...[/INST]).
+    # prefix/suffix are single spaces on purpose: any non-empty value takes
+    # precedence over prompts/Mistral.yaml, so the Jinja-rendered prompt
+    # (which already contains [INST] markers) is not wrapped in a second
+    # pair — that malformed doubling is what made the model emit a leading
+    # <s> (BOS token leaking into the detokenized answer).
     prompt:
       system_prompt_type: Mistral
+      prefix: " "
+      suffix: " "

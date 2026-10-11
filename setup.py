@@ -23,7 +23,8 @@ setup (
     },
     entry_points={
         'console_scripts': [
-            'chat_bridge_node = nao_agent.chat_bridge_node:main'
+            'chat_bridge_node = nao_agent.chat_bridge_node:main',
+            'motion_server_node = nao_agent.motion.server:main',
         ],
     },
 )

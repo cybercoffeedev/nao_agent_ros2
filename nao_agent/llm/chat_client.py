@@ -36,6 +36,7 @@ class ChatClient:
         self,
         messages: list,
         temp: float = 0.2,
+        grammar_schema: str = "",
     ) -> GenerateChatCompletions.Goal:
         goal = GenerateChatCompletions.Goal()
         ros_messages: list = []
@@ -48,8 +49,11 @@ class ChatClient:
         goal.add_generation_prompt = True
         goal.use_jinja = True
         goal.stream = False
-        # TODO: wire tools / sampling_config.grammar (GBNF) here.
+        # TODO: envelope "action" executor covers postures; motion beyond
+        # that (walk, gestures) extends the schema + strategies.
         goal.sampling_config.temp = float(temp)
+        # JSON schema compiled to GBNF server-side; empty disables it.
+        goal.sampling_config.grammar_schema = grammar_schema
         return goal
 
     def send_async(self, goal: GenerateChatCompletions.Goal, feedback_cb=None):

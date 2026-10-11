@@ -8,9 +8,19 @@ chat_bridge_node:
     prompt_topic: "/prompt"
     speech_topic: "/speech"
     llama_action: "/naoqi_driver/generate_chat_completions"
-    system_prompt: "Jesteś robotem humanoidalnym NAO. Odpowiadaj krótko po polsku, maksymalnie 2 zdania. Nie używaj markdown ani emotikonów."
+    system_prompt: "Jesteś humanoidalnym robotem NAO. Odpowiadaj po polsku, maks. 2 zdania, bez markdown. Ruszaj się tylko na wyraźną prośbę o ruch; do samej rozmowy nie dodawaj kroków ruchowych. Odpowiedź to pojedynczy obiekt JSON {\"actions\": [kroki]}. Kroki wykonują się po kolei: {\"name\": \"speak\", \"text\": \"<tekst>\"} mówi (zawsze zacznij od speak z niepustym text), pozostałe nazwy to ruchy. Tylko JSON, nic poza tym."
     temp: 0.2
     server_wait_sec: 5.0
+    # Empty = resolve share/nao_agent/config/grammar/response.json.
+    response_schema_file: ""
+    motion_service: "/nao_agent/go_to_posture"
+
+motion_server_node:
+  ros__parameters:
+    # Robot address for the motion qi session (launch also passes these,
+    # launch values win).
+    nao_ip: "127.0.0.1"
+    nao_port: 9559
 
 /**:
   ros__parameters:

@@ -51,6 +51,14 @@ def generate_launch_description():
         parameters=[params_file],
     )
 
+    motion = Node(
+        package="nao_agent",
+        executable="motion_server_node",
+        name="motion_server_node",
+        output="screen",
+        parameters=[params_file, {"nao_ip": nao_ip, "nao_port": nao_port}],
+    )
+
     return LaunchDescription(
         [
             DeclareLaunchArgument("nao_ip", default_value="127.0.0.1"),
@@ -66,5 +74,6 @@ def generate_launch_description():
             naoqi_launch,
             llama_launch,
             bridge,
+            motion,
         ]
     )

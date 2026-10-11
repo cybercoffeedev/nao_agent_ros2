@@ -1,24 +1,36 @@
-"""Bridge prompt -> llama_ros -> /speech.
+"""Bridge prompt -> llama_ros -> speech + posture actions.
 
 Flow:
   /prompt (std_msgs/String, test injection instead of microphone)
-  -> action /llama/generate_chat_completions (PL system + user)
-  -> /speech (std_msgs/String) -> naoqi_driver -> ALTextToSpeech.say()
+  -> action generate_chat_completions (system + user, ordered steps
+     constrained by grammar_schema)
+  -> parse [{speak, motion}...] -> speak texts to /speech, motions run
+     in order via the motion service (/nao_agent/go_to_posture)
 
-Non-blocking: the /prompt callback sends the goal asynchronously,
-chained as goal_response -> result -> publish. A single-flight flag
-prevents overlapping say() calls (driver does async say with no queue).
+Non-blocking: the /prompt callback sends the goal asynchronously, then a
+sequence runner walks the steps (speak publishes, motion blocks per step).
+Single-flight covers the whole sequence; motion has its own guard inside
+the executor (single writer on ALMotion).
 """
 
+import os
 import threading
+import time
 
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from std_msgs.msg import String
 
 from nao_agent.llm.chat_client import ChatClient
 from nao_agent.llm.prompts import build_messages
+from nao_agent.motion.actions import SPEAK_ACTION, action_list_fragment
+from nao_agent.response.parser import EnvelopeError, parse_envelope
 from nao_agent.speech.speaker import Speaker
+from naoqi_bridge_msgs.srv import SetString
+
+MOTION_SERVICE = "/nao_agent/go_to_posture"
+MOTION_TIMEOUT_SEC = 120.0
 
 
 class ChatBridgeNode(Node):
@@ -31,6 +43,8 @@ class ChatBridgeNode(Node):
         # Single source of truth for the prompt text is config/params.yaml
         # (`system_prompt`); an empty value fails fast in _on_prompt.
         self.declare_parameter("system_prompt", "")
+        self.declare_parameter("response_schema_file", "")
+        self.declare_parameter("motion_service", MOTION_SERVICE)
         self.declare_parameter("temp", 0.2)
         self.declare_parameter("server_wait_sec", 5.0)
 
@@ -39,12 +53,23 @@ class ChatBridgeNode(Node):
         llama_action = self.get_parameter("llama_action").value
         self._llama_action = llama_action
 
-        self._system_prompt = self.get_parameter("system_prompt").value
+        raw_prompt = self.get_parameter("system_prompt").value.strip()
+        if not raw_prompt:
+            raise RuntimeError(
+                "Empty `system_prompt` param "
+                "(launch with --params-file <.../nao_agent/config/params.yaml>)"
+            )
+        self._system_prompt = raw_prompt + "\n" + action_list_fragment()
         self._temp = float(self.get_parameter("temp").value)
         self._server_wait = float(self.get_parameter("server_wait_sec").value)
+        self._grammar_schema = self._load_schema(
+            self.get_parameter("response_schema_file").value
+        )
 
         self._speaker = Speaker(self, speech_topic)
         self._llm = ChatClient(self, llama_action)
+        self._motion_service = self.get_parameter("motion_service").value
+        self._motion = self.create_client(SetString, self._motion_service)
 
         self._lock = threading.Lock()
         self._busy = False
@@ -66,15 +91,10 @@ class ChatBridgeNode(Node):
             self._busy = True
 
         self.get_logger().info(f"Prompt: {text[:120]}")
-        if not self._system_prompt.strip():
-            self.get_logger().error(
-                "Empty `system_prompt` param, aborting "
-                "(set it in config/params.yaml)"
-            )
-            self._release()
-            return
         messages = build_messages(self._system_prompt, text)
-        goal = self._llm.make_goal(messages, temp=self._temp)
+        goal = self._llm.make_goal(
+            messages, temp=self._temp, grammar_schema=self._grammar_schema
+        )
 
         if not self._llm.wait_for_server(timeout_sec=self._server_wait):
             self.get_logger().error(
@@ -116,13 +136,92 @@ class ChatBridgeNode(Node):
             text = ChatClient.extract_text(result)
             if not text:
                 self.get_logger().warn("LLM returned an empty response")
-            else:
-                self.get_logger().info(f"LLM: {text[:200]}")
-                self._speaker.say(text)
+                self._release()
+                return
+            try:
+                response = parse_envelope(text)
+            except EnvelopeError as e:
+                # Raw JSON must never reach speech.
+                self.get_logger().warn(f"Dropping malformed envelope: {e}")
+                self._release()
+                return
+            if response.dropped:
+                self.get_logger().warn(f"Dropping unknown steps: {response.dropped}")
+            if not response.actions:
+                self.get_logger().warn("LLM returned no actions")
+                self._release()
+                return
+            thread = threading.Thread(
+                target=self._run_sequence, args=(response,), daemon=True
+            )
+            thread.start()
         except Exception as e:  # noqa: BLE001
             self.get_logger().error(f"LLM result failed: {e}")
+            self._release()
+
+    def _run_sequence(self, response) -> None:
+        """Walk steps in order; speak publishes, motion goes via service."""
+        try:
+            for item in response.actions:
+                if item.name == SPEAK_ACTION:
+                    if item.text:
+                        self._speaker.say(item.text)
+                    else:
+                        self.get_logger().warn("Skipping empty speak step")
+                    continue
+                if not self._call_motion(item.name):
+                    break
         finally:
             self._release()
+
+    def _call_motion(self, action: str) -> bool:
+        """Call the motion service; main thread keeps spinning for us."""
+        if not self._motion.wait_for_service(timeout_sec=self._server_wait):
+            self.get_logger().warn(
+                f"Motion service '{self._motion_service}' unavailable, "
+                "skipping motion (speech continues)"
+            )
+            return True
+        request = SetString.Request()
+        request.data = action
+        future = self._motion.call_async(request)
+        # rclpy futures are not concurrent.futures: poll done() instead.
+        # No spinning needed here — the main thread keeps spinning.
+        deadline = time.monotonic() + MOTION_TIMEOUT_SEC
+        while not future.done():
+            if time.monotonic() > deadline:
+                self.get_logger().warn(
+                    f"Motion {action} timed out, aborting sequence"
+                )
+                return False
+            time.sleep(0.1)
+        try:
+            ok = future.result().success
+        except Exception as e:  # noqa: BLE001
+            self.get_logger().warn(f"Motion {action} failed: {e}, aborting sequence")
+            return False
+        if not ok:
+            self.get_logger().warn(f"Motion {action} rejected, aborting sequence")
+            return False
+        self.get_logger().info(f"Motion {action}: done")
+        return True
+
+    def _load_schema(self, path: str) -> str:
+        if not path:
+            path = os.path.join(
+                get_package_share_directory("nao_agent"),
+                "config",
+                "grammar",
+                "response.json",
+            )
+        try:
+            with open(path, encoding="utf-8") as f:
+                schema = f.read()
+            self.get_logger().info(f"Response schema loaded: {path}")
+            return schema
+        except OSError as e:
+            self.get_logger().warn(f"No response schema at {path} ({e}), grammar off")
+            return ""
 
     def _release(self) -> None:
         with self._lock:

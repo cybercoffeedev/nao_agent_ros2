@@ -1,0 +1,54 @@
+{
+    "name": "nao_agent_ros2",
+    "remoteUser": "ros2dev",
+    "build": {
+        "dockerfile": "devcontainer.containerfile",
+        "args": {
+            "USERNAME": "ros2dev",
+            "ROS_DISTRO": "jazzy"
+        }
+    },
+    "workspaceFolder": "/home/ws/src/nao_agent_ros2",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/home/ws/src/nao_agent_ros2,type=bind",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "Ranch-Hand-Robotics.rde-ros-2",
+                "ms-python.python",
+                "ms-python.debugpy",
+                "redhat.vscode-xml",
+                "bierner.markdown-mermaid"
+            ]
+        }
+    },
+    "containerEnv": {
+        "DISPLAY": "unix:0",
+        "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST",
+        "ROS_DOMAIN_ID": "42"
+    },
+    "runArgs": [
+        "--net=host",
+        "-e", "DISPLAY=${env:DISPLAY}"
+    ],
+    "mounts": [
+        // GUI forwarding for rviz/Choregraphe.
+        "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
+        "source=/dev/dri,target=/dev/dri,type=bind,consistency=cached",
+        // Agent tooling state (named volumes; ownership fixed in setup).
+        "source=opencode-config,target=/home/ros2dev/.config/opencode,type=volume",
+        "source=opencode-data,target=/home/ros2dev/.local/share/opencode,type=volume",
+        // Caches surviving rebuilds: apt archives + colcon outputs.
+        // Wipe after a base-image bump if builds misbehave.
+        "source=nao-agent-apt-cache,target=/var/cache/apt,type=volume",
+        "source=nao-agent-ws-build,target=/home/ws/build,type=volume",
+        "source=nao-agent-ws-install,target=/home/ws/install,type=volume",
+        "source=nao-agent-ws-log,target=/home/ws/log,type=volume",
+        // Pinned dependency checkouts (versions in dependencies.repos).
+        // Persisted so clones and rebuilds happen once; update with
+        // git pull inside, or drop the volume for a fresh clone.
+        "source=nao-agent-src-llama,target=/home/ws/src/llama_ros,type=volume",
+        "source=nao-agent-src-driver,target=/home/ws/src/naoqi_driver2,type=volume"
+    ],
+    "postCreateCommand": "bash .devcontainer/setup-workspace.sh",
+    "postStartCommand": "bash .devcontainer/start-sim.sh"
+}

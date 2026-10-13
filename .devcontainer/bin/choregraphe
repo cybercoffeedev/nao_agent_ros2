@@ -1,0 +1,8 @@
+#!/bin/bash
+# One-word Choregraphe launcher: choregraphe
+# Assumes the simulator is up (start-sim.sh runs at container start);
+# Choregraphe itself starts without an embedded broker and connects out.
+export LD_LIBRARY_PATH=/opt/naoqi_tools/lib
+setsid nohup /opt/naoqi_tools/bin/choregraphe-bin --no-naoqi "$@" \
+    < /dev/null > /tmp/choregraphe.log 2>&1 &
+echo "choregraphe starting (log: /tmp/choregraphe.log)"

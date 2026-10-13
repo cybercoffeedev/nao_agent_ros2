@@ -37,11 +37,19 @@ It is a living document — update it as the codebase evolves.
 │   ├── test_action_parity.py # registry/schema enum parity guard
 │   └── test_posture_executor.py # executor tests with fake qi services
 ├── resource/nao_agent        # ament package marker (do not touch)
+├── .devcontainer/            # reproducible dev container (own workspace bootstrap)
+│   ├── devcontainer.json     # mounts this repo at /home/ws/src/nao_agent_ros2
+│   ├── devcontainer.containerfile # ROS Jazzy + choregraphe + tooling image
+│   ├── setup-workspace.sh    # siblings, rosdep, full build (wheel pre-baked)
+│   ├── start-sim.sh          # autostart naoqi-bin, pins NAO V6 robot model
+│   └── bin/choregraphe       # one-word GUI launcher (needs forwarded X11)
 ├── dependencies.repos        # vcstool sources: naoqi_driver2, llama_ros
 ├── package.xml               # Package manifest (depends: rclpy, std_msgs, llama_msgs, naoqi_bridge_msgs)
 ├── setup.py                  # Build config + console_scripts entry points
 ├── setup.cfg                 # Script install dir
 ├── README.md                 # Package stub (see ARCHITECTURE.md for docs)
+├── AGENTS.md                 # Agent guidelines (English comments, no gold plating)
+├── .vscode/launch.json       # Debug config (rest of .vscode/ is ignored)
 └── ARCHITECTURE.md           # This document
 ```
 
@@ -159,7 +167,7 @@ Description: The ROS driver does not expose ALRobotPosture, so motion is
 a first-class ROS service in our own package instead of a side channel:
 `motion_server_node` serves `/nao_agent/go_to_posture`
 (`naoqi_bridge_msgs/srv/SetString`: action name in, success out) on a
-multithreaded executor with a reentrant callback group and runs the
+multithreaded executor and runs the
 blocking NAOqi calls there.
 `PostureExecutor` underneath only guards (single writer on ALMotion) and
 dispatches registered `@action` handlers over its own qi session to the
@@ -226,8 +234,8 @@ Purpose: Weights loaded by `llama_node` at startup; selected via
 
 llama_ros (`llama_node` + `llama_msgs`)
 
-Purpose: Local LLM inference backend (chat completions, tokenize,
-embeddings).
+Purpose: Local LLM inference backend (chat completions only — that is
+all the bridge uses).
 
 Integration Method: ROS 2 action `GenerateChatCompletions`
 (deployed server `/naoqi_driver/generate_chat_completions` via the
@@ -236,11 +244,9 @@ Integration Method: ROS 2 action `GenerateChatCompletions`
 naoqi_driver2 (`naoqi_driver_node`)
 
 Purpose: NAOqi <-> ROS 2 bridge; its `SpeechSubscriber` maps
-`/speech` (`std_msgs/String`) to `ALTextToSpeech.say()` and exposes
-`set_language` / `get_language` services plus the `listen` action.
+`/speech` (`std_msgs/String`) to `ALTextToSpeech.say()`.
 
-Integration Method: ROS 2 topic `/speech`; services
-`/naoqi_driver/set_language`, `/naoqi_driver/get_language`.
+Integration Method: ROS 2 topic `/speech`.
 
 NAOqi / naoqi-bin simulator (`ALTextToSpeech`)
 
@@ -258,9 +264,9 @@ Cloud Provider: None (local robot / workstation deployment)
 Key Services Used: ROS 2 Jazzy, colcon workspace (`/home/ws`),
 DDS with `ROS_DOMAIN_ID=42`, `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`
 
-Motion backend: libqi-python wheel built from source
-(aldebaran/libqi-python + libqi 4.0.5 via conan, `pip install --user`;
-not on PyPI). The executor imports it lazily — without the wheel the
+Motion backend: libqi-python wheel baked into the dev image by a
+builder stage (aldebaran/libqi-python + libqi 4.0.5, auditwheel-repaired,
+self-contained). The executor imports it lazily — without the wheel the
 bridge still talks, motion actions just fail with a clear log.
 
 CI/CD Pipeline: None yet (manual `colcon build --packages-select nao_agent`)
@@ -294,6 +300,17 @@ ros2 launch nao_agent bringup.launch.py nao_ip:=127.0.0.1 nao_port:=9559
 # terminal 3: ros2 topic pub --once /prompt std_msgs/msg/String "{data: 'Cześć, kim jesteś?'}"
 ```
 
+Fresh machine: clone only this repo, reopen it in VS Code dev container
+(`.devcontainer/`). First create recreates `/home/ws/src` (sibling
+checkouts via `dependencies.repos`), installs rosdep deps and builds the
+full workspace — long one time, skips on rebuilds. Sibling checkouts, apt
+archives and colcon outputs live on named volumes; update pinned deps
+with `git pull` inside `src/<repo>`. Container autostart (postStart):
+naoqi-bin simulator with NAO V6 identity (robot model pinned to
+`NAOH25V60.xml`, so Choregraphe opens a NAO, not a Pepper);
+Choregraphe via the `choregraphe`
+one-word launcher (needs X11 forwarding, never autostarted).
+
 Testing Frameworks: `pytest` matrices (`test/test_parser.py`,
 `test/test_action_parity.py`,
 `test/test_posture_executor.py`); manual smoke checks (`make_goal` with
@@ -304,15 +321,29 @@ declared as test dependencies.
 
 ## 9. Future Considerations / Roadmap
 
-- Motion beyond postures: first gesture (`wave_right_hand`) is in via
-  `angleInterpolation`; next candidates are `ALLeds` expressions and
-  `ALMotion.moveTo` walking (highest risk, last), each as a decorated
-  handler + schema enum entry.
-- Real-robot commissioning: verify the `Polish` TTS voice is installed
-  (`getAvailableLanguages`), enable joint stiffness (`wakeUp`) before
-  `goToPosture`, supervise first transitions (`applyPosture` is forbidden).
-- Real voice input: `whisper_ros` integration replacing the `/prompt`
-  test-injection topic (currently out of scope: `naoqi-bin` has no mic).
+- Vision (LLaVA): swap `llama_node` for `llava_node` from the same
+  `llama_ros` stack so the robot can see. `llava_node` serves the same
+  `GenerateChatCompletions` action (the goal only gains
+  `sensor_msgs/Image[] images`; grammar constraints are unchanged), so
+  `ChatClient`, the envelope and the parser stay as-is and camera frames
+  are fed per request. Requires camera images from the driver, `mmproj`
+  weights in the model config, and a compute check (currently CPU-only
+  inference).
+- Real voice input: `whisper_ros` (wrapper over whisper.cpp) STT node
+  consuming the driver's audio topic (`AudioBuffer` extraction, enabled
+  in the driver by default) and publishing transcribed utterances to
+  `/prompt`, replacing test injection. Hearing through the NAO6's
+  built-in microphones requires a physical robot (`naoqi-bin` has no mic
+  input); the STT pipeline itself is testable in simulation with audio
+  files or the host microphone. Prerequisites: the driver's public audio
+  endpoint (port forwarding, otherwise audio extraction is disabled),
+  VAD/utterance segmentation, and echo gating (do not listen while the
+  robot itself is speaking).
+- Multilingual support: parameterize the interaction language instead of
+  the hardcoded Polish `system_prompt` (per-language prompt text with the
+  matching TTS voice and STT language), selectable via config/param.
+  Speech synthesis stays on the robot via `ALTextToSpeech` (voice set per
+  language); the bridge keeps publishing plain text to `/speech`.
 - Runtime action remapping: recreate the `ActionClient` when the
   `llama_action` parameter changes instead of binding it once at startup.
 - Speech-gated sequencing: pace the next step on the `TextDone` event
@@ -320,6 +351,13 @@ declared as test dependencies.
   verification that `naoqi-bin` synthesizes the event).
 - Persistent test suite under `test/` (goal building, speaker
   with a mocked publisher).
+- VLA control (research track, last): once the agent is complete,
+  experiments with a vision-language-action policy are planned in a
+  separate repository (new ROS package in the same workspace, talking to
+  this stack over topics only). Candidate action space is the driver's
+  `cmd_vel` + `JointAnglesWithSpeed` (upper body; locomotion and balance
+  stay with the walk engine). Discrete actions, the response envelope and
+  the motion single-writer guard stay in this repo.
 
 ## 10. Project Identification
 
@@ -329,7 +367,7 @@ Repository URL: https://github.com/cybercoffeedev/nao_agent_ros2
 
 Primary Contact/Team: cybercoffeedev
 
-Date of Last Update: 2026-10-11
+Date of Last Update: 2026-10-12
 
 ## 11. Glossary / Acronyms
 
@@ -342,6 +380,14 @@ naoqi-bin: NAOqi simulator binary; no audio output or microphone support.
 
 llama_ros: ROS 2 wrapper around llama.cpp exposing LLM inference as
 actions/services (by Miguel Ángel González Santamarta et al.).
+
+LLaVA: Large Language and Vision Assistant; `llava_node` (same
+`llama_ros` stack) adds image understanding to the chat completions
+action via a multimodal projector (`mmproj`).
+
+VLA: Vision-Language-Action policy mapping images + language instruction
+to robot control commands; research track, no off-the-shelf checkpoint
+exists for the NAO embodiment.
 
 GenerateChatCompletions: `llama_msgs` action for chat-style inference
 (`messages[]` -> `choices[].message.content`).

@@ -23,6 +23,19 @@
 - If a request conflicts with `ARCHITECTURE.md`, keep the existing design
   and point out the conflict instead of silently diverging.
 
+## Testing
+
+- Every behavior change needs a test: add or extend the `pytest` matrix
+  in `test/` alongside the implementation (new file only if no existing
+  one fits, e.g. `test/test_prompts.py` for a new pure module).
+- Keep ROS out of unit tests: put logic in pure, framework-free functions
+  (like `nao_agent/llm/prompts.py`) and test those; use fakes for NAOqi
+  proxies (see `FakeSession`/`FakeLeds` patterns in `test/`).
+- Always run the full suite (`python3 -m pytest test/ -q`) plus
+  `py_compile` on touched files before reporting done; a failing new
+  test means fixing the code (or the test), never deleting coverage.
+- Do not commit with red tests.
+
 ## No gold plating
 
 - Implement exactly what was asked. Do not add extra features, configs,

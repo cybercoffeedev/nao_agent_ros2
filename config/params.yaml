@@ -14,6 +14,9 @@ chat_bridge_node:
     # Empty = resolve share/nao_agent/config/grammar/response.json.
     response_schema_file: ""
     motion_service: "/nao_agent/go_to_posture"
+    # Thinking-eyes animation while the LLM works (false = disable).
+    thinking_eyes: true
+    eyes_service: "/nao_agent/set_eyes"
 
 motion_server_node:
   ros__parameters:

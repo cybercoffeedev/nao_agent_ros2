@@ -21,8 +21,9 @@ It is a living document — update it as the codebase evolves.
 │   ├── motion/               # Posture execution (own qi session)
 │   │   ├── __init__.py
 │   │   ├── actions.py        # @action registry (single source of actions)
+│   │   ├── eyes.py           # thinking-eyes FaceLed animation + service name
 │   │   ├── posture_executor.py # guard + dispatch (blocking run)
-│   │   └── server.py         # ROS service front (/nao_agent/go_to_posture)
+│   │   └── server.py         # ROS service fronts (posture + eyes)
 │   └── speech/               # Speech adapter layer (no LLM knowledge)
 │       ├── __init__.py
 │       └── speaker.py        # Adapter for /speech -> ALTextToSpeech
@@ -35,6 +36,7 @@ It is a living document — update it as the codebase evolves.
 ├── test/
 │   ├── test_parser.py        # pytest matrix for the envelope parser
 │   ├── test_action_parity.py # registry/schema enum parity guard
+│   ├── test_eyes.py          # eye animator tests with fake ALLeds
 │   └── test_posture_executor.py # executor tests with fake qi services
 ├── resource/nao_agent        # ament package marker (do not touch)
 ├── .devcontainer/            # reproducible dev container (own workspace bootstrap)
@@ -93,7 +95,9 @@ flowchart LR
     S --> Driver{<b>naoqi_driver_node</b>\nnaoqi_driver2}
     Driver -- "say text" --> TTS[ALTextToSpeech]
     SvcClient -- "SetString service /nao_agent/go_to_posture" --> MotionSvc{<b>motion_server_node</b>\n<i>server.py and posture_executor.py</i>\nservice front, guard, dispatch}
+    SvcClient -. "SetString /nao_agent/set_eyes (thinking on/off)" .-> MotionSvc
     MotionSvc -- "goToPosture and angleInterpolation, own qi session" --> Motion[ALRobotPosture and ALMotion]
+    MotionSvc -- "FaceLeds comet, own qi session" --> Eyes[ALLeds]
     Handlers -. "handlers run inside server" .-> MotionSvc
 ```
 
@@ -185,6 +189,14 @@ note below).
 
 Technologies: Pure Python + libqi-python, pytest
 
+Eye animation (ported from `RobotEyes` in
+[nao-agent](https://github.com/cybercoffeedev/nao-agent), the previous
+plain-Python + qi implementation without ROS 2): the same node also
+serves `/nao_agent/set_eyes` (`SetString`: `"thinking"`/`""` in, success
+out). The bridge turns the rotating FaceLed comet on when a prompt is
+accepted and off when the answer is handled; best effort, never blocks.
+Covered by `test/test_eyes.py` with fake ALLeds.
+
 ### 3.6. Speaker (speech adapter)
 
 Name: `Speaker` (`nao_agent/speech/speaker.py`)
@@ -211,14 +223,15 @@ Technologies: ROS 2 Launch (Python)
 ### 4.1. ROS graph (transient transport)
 
 Name: Topics `/prompt`, `/speech`; action `generate_chat_completions`;
-service `/nao_agent/go_to_posture`
+services `/nao_agent/go_to_posture`, `/nao_agent/set_eyes`
 
 Type: ROS 2 DDS topics / action (in-memory, no persistence)
 
 Purpose: `/prompt` carries test-injected user utterances
 (`std_msgs/String`); `/speech` carries LLM answers to the driver;
 the action carries chat goals/results including streaming feedback;
-the service carries motion goals (`naoqi_bridge_msgs/srv/SetString`).
+the services carry motion goals and eye-mode switches
+(`naoqi_bridge_msgs/srv/SetString`).
 
 Key Schemas/Collections: `std_msgs/msg/String`,
 `llama_msgs/action/GenerateChatCompletions`,

@@ -13,10 +13,10 @@ Single-flight covers the whole sequence; motion has its own guard inside
 the executor (single writer on ALMotion).
 """
 
+from collections import deque
 import os
 import threading
 import time
-from collections import deque
 
 import rclpy
 from ament_index_python.packages import get_package_share_directory
@@ -26,6 +26,7 @@ from std_msgs.msg import String
 from nao_agent.llm.chat_client import ChatClient
 from nao_agent.llm.prompts import build_messages, clip_text
 from nao_agent.motion.actions import SPEAK_ACTION, action_list_fragment
+from nao_agent.motion.eyes import EYES_SERVICE
 from nao_agent.motion.posture_executor import SERVICE_NAME as MOTION_SERVICE
 from nao_agent.response.parser import EnvelopeError, parse_envelope
 from nao_agent.speech.speaker import Speaker
@@ -48,6 +49,10 @@ class ChatBridgeNode(Node):
         self.declare_parameter("motion_service", MOTION_SERVICE)
         self.declare_parameter("temp", 0.2)
         self.declare_parameter("server_wait_sec", 5.0)
+        # Thinking-eyes animation while the LLM works (via the motion
+        # server's eye service; best effort, never blocks the flow).
+        self.declare_parameter("thinking_eyes", True)
+        self.declare_parameter("eyes_service", EYES_SERVICE)
         # Conversation memory (in-process only, restart clears it):
         # last `history_turns` exchanges, each message clipped to
         # `history_msg_chars` so one long prompt cannot evict the
@@ -81,6 +86,10 @@ class ChatBridgeNode(Node):
         self._llm = ChatClient(self, llama_action)
         self._motion_service = self.get_parameter("motion_service").value
         self._motion = self.create_client(SetString, self._motion_service)
+        self._thinking_eyes = bool(self.get_parameter("thinking_eyes").value)
+        self._eyes = self.create_client(
+            SetString, self.get_parameter("eyes_service").value
+        )
 
         self._lock = threading.Lock()
         self._busy = False
@@ -107,6 +116,7 @@ class ChatBridgeNode(Node):
             history = list(self._history)
             if self._history_turns > 0:
                 self._history.append(("user", clipped))
+        self._think(True)
         messages = build_messages(self._system_prompt, clipped, history)
         goal = self._llm.make_goal(
             messages, temp=self._temp, grammar_schema=self._grammar_schema
@@ -169,6 +179,7 @@ class ChatBridgeNode(Node):
             if spoken and self._history_turns > 0:
                 with self._lock:
                     self._history.append(("assistant", clip_text(spoken, self._history_chars)))
+            self._think(False)
             thread = threading.Thread(
                 target=self._run_sequence, args=(response,), daemon=True
             )
@@ -240,7 +251,28 @@ class ChatBridgeNode(Node):
         except OSError as e:
             raise RuntimeError(f"Response schema missing at {path}: {e}") from e
 
+    def _think(self, on: bool) -> None:
+        """Start/stop the thinking-eyes animation; best effort, never blocks."""
+        if not self._thinking_eyes:
+            return
+        request = SetString.Request()
+        request.data = "thinking" if on else ""
+        try:
+            future = self._eyes.call_async(request)
+        except Exception as e:  # noqa: BLE001 - eyes must not break the flow
+            self.get_logger().debug(f"Eyes call failed: {e}")
+            return
+        future.add_done_callback(self._on_eyes_done)
+
+    @staticmethod
+    def _on_eyes_done(future) -> None:
+        try:
+            future.result()
+        except Exception:  # noqa: BLE001 - eyes are best effort
+            pass
+
     def _release(self) -> None:
+        self._think(False)
         with self._lock:
             self._busy = False
 

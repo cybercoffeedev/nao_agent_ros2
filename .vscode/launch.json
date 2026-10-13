@@ -1,0 +1,33 @@
+{
+  // Debugs the bridge with the package params (system prompt, action names).
+  // Without --params-file the node fail-fasts on the empty system_prompt.
+  // NOTE: workspaceFolder is the package root (/home/ws/src/nao_agent_ros2
+  // in devcontainer, see .devcontainer/devcontainer.json), so paths below
+  // are relative to it, not to /home/ws.
+  // Launch from a terminal with ROS sourced, e.g.:
+  //   source /opt/ros/jazzy/setup.bash && source /home/ws/install/setup.bash
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ROS: chat_bridge_node",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/nao_agent/chat_bridge_node.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--ros-args",
+        "--params-file",
+        "${workspaceFolder}/config/params.yaml",
+        // Manual stack: base.launch.py defaults to namespace `llama`,
+        // so the live server is /llama/... (full bringup may differ).
+        "-p",
+        "llama_action:=/llama/generate_chat_completions"
+      ],
+      "env": {
+        // Prefer package sources over the installed copy so breakpoints
+        // set in src/ bind to the executed code.
+        "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
+      }
+    }
+  ]
+}

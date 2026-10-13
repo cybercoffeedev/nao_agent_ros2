@@ -17,7 +17,8 @@ echo "==> 1/4 sibling checkouts (llama_ros, naoqi_driver2)"
 sudo install -D -m 755 "$PKG_DIR/.devcontainer/bin/choregraphe" /usr/local/bin/choregraphe
 # Named tooling volumes start root-owned; claim them so ros2dev can write.
 sudo install -d -o "$(whoami)" -g "$(whoami)" \
-    /home/ros2dev/.config/opencode /home/ros2dev/.local/share/opencode
+    /home/ros2dev/.config/opencode /home/ros2dev/.local/share/opencode \
+    /home/ros2dev/.cache/huggingface
 # The bind mount only covers this package; the parents are daemon-created
 # root-owned, so claim them before vcs/colcon write next to us.
 sudo install -d -o "$(whoami)" -g "$(whoami)" "$WS" "$WS/src"

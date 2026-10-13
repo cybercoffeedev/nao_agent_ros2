@@ -37,9 +37,11 @@
         // Agent tooling state (named volumes; ownership fixed in setup).
         "source=opencode-config,target=/home/ros2dev/.config/opencode,type=volume",
         "source=opencode-data,target=/home/ros2dev/.local/share/opencode,type=volume",
-        // Caches surviving rebuilds: apt archives + colcon outputs.
+        // Caches surviving rebuilds: apt archives, colcon outputs,
+        // HuggingFace model weights (llama_ros downloads via hf_hub).
         // Wipe after a base-image bump if builds misbehave.
         "source=nao-agent-apt-cache,target=/var/cache/apt,type=volume",
+        "source=nao-agent-hf-cache,target=/home/ros2dev/.cache/huggingface,type=volume",
         "source=nao-agent-ws-build,target=/home/ws/build,type=volume",
         "source=nao-agent-ws-install,target=/home/ws/install,type=volume",
         "source=nao-agent-ws-log,target=/home/ws/log,type=volume",

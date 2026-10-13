@@ -12,7 +12,9 @@ multithreaded executor, or a worker thread).
 import threading
 from typing import Any, Callable
 
-from nao_agent.motion.actions import HANDLERS, MotionError, PostureActions
+from nao_agent.motion.actions import MotionError, PostureActions
+
+SERVICE_NAME = "/nao_agent/go_to_posture"
 
 
 def connect_qi(nao_ip: str, nao_port: int) -> Any:
@@ -32,41 +34,26 @@ def connect_qi(nao_ip: str, nao_port: int) -> Any:
 class PostureExecutor:
     """Runs registered actions in a worker thread with a single-flight guard."""
 
-    def __init__(
-        self,
-        connect: Callable[[], Any],
-        logger: Any,
-    ) -> None:
+    def __init__(self, connect: Callable[[], Any]) -> None:
         self._connect = connect
-        self._logger = logger
         self._lock = threading.Lock()
         self._moving = False
 
     def run(self, action: str) -> str:
         """Run an action synchronously (caller must use a worker thread)."""
-        if action not in HANDLERS:
-            raise MotionError(f"Unknown action: {action}")
         with self._lock:
             if self._moving:
                 raise MotionError("motion busy")
             self._moving = True
         try:
-            return self._perform(action)
+            try:
+                session = self._connect()
+                actions = PostureActions(session.service)
+                return actions.execute(action)
+            except MotionError:
+                raise
+            except Exception as e:  # noqa: BLE001 - backend or NAOqi call failed
+                raise MotionError(f"{action} failed: {e}") from e
         finally:
             with self._lock:
                 self._moving = False
-
-    def _perform(self, action: str) -> str:
-        try:
-            session = self._connect()
-        except MotionError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise MotionError(f"backend unavailable: {e}") from e
-        actions = PostureActions(session.service)
-        try:
-            return actions.execute(action)
-        except MotionError:
-            raise
-        except Exception as e:  # noqa: BLE001 - NAOqi call failed
-            raise MotionError(f"{action} failed: {e}") from e

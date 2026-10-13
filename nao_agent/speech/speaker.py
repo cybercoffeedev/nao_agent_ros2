@@ -15,13 +15,12 @@ class Speaker:
         self._node = node
         self._pub = node.create_publisher(String, topic, 10)
 
-    def say(self, text: str) -> str:
+    def say(self, text: str) -> None:
         clean = (text or "").strip()
         if not clean:
             self._node.get_logger().warn("Speaker: empty response, skipping /speech")
-            return ""
+            return
         msg = String()
         msg.data = clean
         self._pub.publish(msg)
         self._node.get_logger().info(f"Speaker -> /speech ({len(clean)} chars)")
-        return clean

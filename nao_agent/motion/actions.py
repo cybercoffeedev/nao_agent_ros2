@@ -18,6 +18,8 @@ DESCRIPTIONS: Dict[str, str] = {}
 SPEAK_ACTION = "speak"
 SPEAK_DESCRIPTION = "say the text from the text field"
 
+POSTURE_SPEED = 0.5
+
 
 class MotionError(Exception):
     """Raised when the motion backend is unavailable or an action fails."""
@@ -49,9 +51,8 @@ def action_list_fragment() -> str:
 class PostureActions:
     """Posture and gesture handlers. Services are injected for testability."""
 
-    def __init__(self, get_service: Callable[[str], Any], speed: float = 0.5) -> None:
+    def __init__(self, get_service: Callable[[str], Any]) -> None:
         self._svc = get_service
-        self._speed = speed
 
     def _go_to_posture(
         self, preset: str, family: str, restore_autonomy: bool
@@ -61,7 +62,7 @@ class PostureActions:
             return f"Already in {family}."
         self._set_autonomy(False)
         try:
-            ok = posture.goToPosture(preset, self._speed)
+            ok = posture.goToPosture(preset, POSTURE_SPEED)
         finally:
             self._set_autonomy(restore_autonomy)
         if not ok:

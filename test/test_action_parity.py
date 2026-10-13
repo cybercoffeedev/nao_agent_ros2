@@ -9,7 +9,7 @@ cannot drift by construction.
 import json
 import os
 
-from nao_agent.motion.actions import HANDLERS, SPEAK_ACTION
+from nao_agent.motion.actions import DESCRIPTIONS, HANDLERS, SPEAK_ACTION
 
 
 def test_schema_enum_matches_registry():
@@ -21,3 +21,5 @@ def test_schema_enum_matches_registry():
     items = schema["properties"]["actions"]["items"]
     assert set(items["properties"]["name"]["enum"]) == {SPEAK_ACTION, *HANDLERS}
     assert set(schema["required"]) == {"actions"}
+    assert set(DESCRIPTIONS) == set(HANDLERS)
+    assert all(DESCRIPTIONS[name].strip() for name in HANDLERS)

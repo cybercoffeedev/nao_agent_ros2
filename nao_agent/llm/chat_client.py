@@ -49,15 +49,13 @@ class ChatClient:
         goal.add_generation_prompt = True
         goal.use_jinja = True
         goal.stream = False
-        # TODO: envelope "action" executor covers postures; motion beyond
-        # that (walk, gestures) extends the schema + strategies.
         goal.sampling_config.temp = float(temp)
         # JSON schema compiled to GBNF server-side; empty disables it.
         goal.sampling_config.grammar_schema = grammar_schema
         return goal
 
-    def send_async(self, goal: GenerateChatCompletions.Goal, feedback_cb=None):
-        return self._client.send_goal_async(goal, feedback_callback=feedback_cb)
+    def send_async(self, goal: GenerateChatCompletions.Goal):
+        return self._client.send_goal_async(goal)
 
     @staticmethod
     def extract_text(result) -> str:

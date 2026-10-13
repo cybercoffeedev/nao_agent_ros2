@@ -7,15 +7,16 @@ one motion never stalls discovery, parameters or shutdown.
 """
 
 import rclpy
-from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 from naoqi_bridge_msgs.srv import SetString
 
-from nao_agent.motion.posture_executor import MotionError, PostureExecutor, connect_qi
-
-SERVICE_NAME = "/nao_agent/go_to_posture"
+from nao_agent.motion.posture_executor import (
+    SERVICE_NAME,
+    PostureExecutor,
+    connect_qi,
+)
 
 
 class MotionServerNode(Node):
@@ -25,14 +26,11 @@ class MotionServerNode(Node):
         self.declare_parameter("nao_port", 9559)
         nao_ip = self.get_parameter("nao_ip").value
         nao_port = int(self.get_parameter("nao_port").value)
-        self._motion = PostureExecutor(
-            lambda: connect_qi(nao_ip, nao_port), self.get_logger()
-        )
+        self._motion = PostureExecutor(lambda: connect_qi(nao_ip, nao_port))
         self.create_service(
             SetString,
             SERVICE_NAME,
             self._on_request,
-            callback_group=ReentrantCallbackGroup(),
         )
         self.get_logger().info(f"motion service ready: {SERVICE_NAME}")
 
@@ -40,11 +38,7 @@ class MotionServerNode(Node):
         action = (request.data or "").strip()
         try:
             message = self._motion.run(action)
-        except MotionError as e:
-            self.get_logger().warn(f"Motion {action!r} failed: {e}")
-            response.success = False
-            return response
-        except Exception as e:  # noqa: BLE001 - NAOqi call failed
+        except Exception as e:  # noqa: BLE001 - NAOqi call or backend failed
             self.get_logger().warn(f"Motion {action!r} failed: {e}")
             response.success = False
             return response
@@ -56,7 +50,7 @@ class MotionServerNode(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = MotionServerNode()
-    executor = MultiThreadedExecutor(num_threads=3)
+    executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(node)
     try:
         executor.spin()

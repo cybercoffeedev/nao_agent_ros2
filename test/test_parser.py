@@ -2,7 +2,6 @@
 
 import pytest
 
-from nao_agent.motion.actions import HANDLERS
 from nao_agent.response.parser import EnvelopeError, Response, parse_envelope
 
 
@@ -56,10 +55,3 @@ def test_empty_list_parses():
 def test_malformed_raises(raw):
     with pytest.raises(EnvelopeError):
         parse_envelope(raw)
-
-
-def test_registry_covers_motion_names():
-    assert set(HANDLERS) == {
-        "sit_down", "stand_up", "lie_on_stomach", "lie_on_back",
-        "wave_right_hand",
-    }

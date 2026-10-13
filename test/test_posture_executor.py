@@ -5,28 +5,8 @@ import time
 
 import pytest
 
-from nao_agent.motion.actions import (
-    DESCRIPTIONS,
-    HANDLERS,
-    SPEAK_ACTION,
-    MotionError,
-    PostureActions,
-)
+from nao_agent.motion.actions import HANDLERS, SPEAK_ACTION, MotionError, PostureActions
 from nao_agent.motion.posture_executor import PostureExecutor
-
-
-class Log:
-    def __init__(self):
-        self.messages = []
-
-    def info(self, msg):
-        self.messages.append(("info", msg))
-
-    def warn(self, msg):
-        self.messages.append(("warn", msg))
-
-    def error(self, msg):
-        self.messages.append(("error", msg))
 
 
 class FakePosture:
@@ -68,24 +48,12 @@ class FakeSession:
         raise RuntimeError(f"no such service: {name}")
 
 
-def make_executor(session=None, log=None):
-    log = log or Log()
-    session = session or FakeSession()
-    return PostureExecutor(lambda: session, log), log
-
-
-def test_registry_covers_expected_actions():
-    assert set(HANDLERS) == {
-        "sit_down", "stand_up", "lie_on_stomach", "lie_on_back",
-        "wave_right_hand",
-    }
-    assert set(DESCRIPTIONS) == set(HANDLERS)
-    assert all(DESCRIPTIONS[name].strip() for name in HANDLERS)
-    assert SPEAK_ACTION == "speak" and SPEAK_ACTION not in HANDLERS
+def make_executor(session=None):
+    return PostureExecutor(lambda: session or FakeSession())
 
 
 def test_unknown_action_rejected_and_raises():
-    executor, _ = make_executor()
+    executor = make_executor()
     with pytest.raises(MotionError):
         executor.run("dance")
     with pytest.raises(MotionError):
@@ -94,36 +62,29 @@ def test_unknown_action_rejected_and_raises():
 
 def test_sit_from_stand_runs_posture():
     session = FakeSession(FakePosture("Standing"))
-    executor, _ = make_executor(session)
+    executor = make_executor(session)
     assert executor.run("sit_down") == "Sit: done"
     assert session.posture.calls == [("Sit", 0.5)]
     assert session.posture.family == "Sitting"
 
 
-def test_run_is_synchronous_and_returns_message():
-    session = FakeSession(FakePosture("Standing"))
-    executor, _ = make_executor(session)
-    assert executor.run("sit_down") == "Sit: done"
-    assert session.posture.family == "Sitting"
-
-
 def test_failed_posture_raises():
     session = FakeSession(FakePosture("Standing", fail_go=True))
-    executor, _ = make_executor(session)
+    executor = make_executor(session)
     with pytest.raises(MotionError):
         executor.run("sit_down")
 
 
 def test_already_sitting_skips_motion():
     session = FakeSession(FakePosture("Sitting"))
-    executor, log = make_executor(session)
+    executor = make_executor(session)
     assert executor.run("sit_down") == "Already in Sitting."
     assert session.posture.calls == []
 
 
 def test_wave_calls_angle_interpolation():
     session = FakeSession(FakePosture("Standing"))
-    executor, _ = make_executor(session)
+    executor = make_executor(session)
     executor.run("wave_right_hand")
     assert len(session.motion.calls) == 1
     names, _, _, absolute = session.motion.calls[0]
@@ -142,7 +103,7 @@ def test_second_action_while_moving_rejected():
             return True
 
     session = FakeSession(SlowPosture("Standing"))
-    executor, _ = make_executor(session)
+    executor = make_executor(session)
     results = []
     thread = threading.Thread(target=lambda: results.append(executor.run("sit_down")))
     thread.start()
@@ -158,7 +119,6 @@ def test_missing_posture_service_raises():
         def service(self, name):
             raise RuntimeError("no ALRobotPosture here")
 
-    log = Log()
-    executor = PostureExecutor(lambda: NoPosture(), log)
+    executor = PostureExecutor(lambda: NoPosture())
     with pytest.raises(MotionError):
         executor.run("sit_down")

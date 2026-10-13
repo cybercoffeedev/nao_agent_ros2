@@ -17,8 +17,8 @@ setup (
     zip_safe=True,
     maintainer="cybercoffeedev",
     maintainer_email="cybercoffeedev@users.noreply.github.com",
-    description="TODO: Package description",
-    license='TODO: Licence declaration',
+    description="Chat bridge: prompt -> llama_ros -> speech + NAO posture actions.",
+    license='Apache-2.0',
     extras_require={
         'test': ['pytest'],
     },

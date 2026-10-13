@@ -25,11 +25,11 @@ from std_msgs.msg import String
 from nao_agent.llm.chat_client import ChatClient
 from nao_agent.llm.prompts import build_messages
 from nao_agent.motion.actions import SPEAK_ACTION, action_list_fragment
+from nao_agent.motion.posture_executor import SERVICE_NAME as MOTION_SERVICE
 from nao_agent.response.parser import EnvelopeError, parse_envelope
 from nao_agent.speech.speaker import Speaker
 from naoqi_bridge_msgs.srv import SetString
 
-MOTION_SERVICE = "/nao_agent/go_to_posture"
 MOTION_TIMEOUT_SEC = 120.0
 
 
@@ -105,16 +105,8 @@ class ChatBridgeNode(Node):
             self._release()
             return
 
-        future = self._llm.send_async(goal, feedback_cb=self._on_feedback)
+        future = self._llm.send_async(goal)
         future.add_done_callback(self._on_goal_response)
-
-    def _on_feedback(self, feedback_msg) -> None:
-        try:
-            chunk = feedback_msg.feedback.choices[0].delta.content
-            if chunk:
-                self.get_logger().debug(f"stream: {chunk[:60]}")
-        except (AttributeError, IndexError):
-            pass
 
     def _on_goal_response(self, future) -> None:
         try:
@@ -220,8 +212,7 @@ class ChatBridgeNode(Node):
             self.get_logger().info(f"Response schema loaded: {path}")
             return schema
         except OSError as e:
-            self.get_logger().warn(f"No response schema at {path} ({e}), grammar off")
-            return ""
+            raise RuntimeError(f"Response schema missing at {path}: {e}") from e
 
     def _release(self) -> None:
         with self._lock:

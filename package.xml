@@ -5,9 +5,9 @@
 <package format="3">
     <name>nao_agent</name>
     <version>0.0.0</version>
-    <description>TODO: Package description</description>
+    <description>Chat bridge: prompt -&gt; llama_ros -&gt; speech + NAO posture actions.</description>
     <maintainer email="cybercoffeedev@users.noreply.github.com">cybercoffeedev</maintainer>
-    <license>TODO: License declaration</license>
+    <license>Apache-2.0</license>
 
     <depend>rclpy</depend>
     <depend>std_msgs</depend>

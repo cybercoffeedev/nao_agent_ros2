@@ -16,6 +16,7 @@ the executor (single writer on ALMotion).
 import os
 import threading
 import time
+from collections import deque
 
 import rclpy
 from ament_index_python.packages import get_package_share_directory
@@ -23,7 +24,7 @@ from rclpy.node import Node
 from std_msgs.msg import String
 
 from nao_agent.llm.chat_client import ChatClient
-from nao_agent.llm.prompts import build_messages
+from nao_agent.llm.prompts import build_messages, clip_text
 from nao_agent.motion.actions import SPEAK_ACTION, action_list_fragment
 from nao_agent.motion.posture_executor import SERVICE_NAME as MOTION_SERVICE
 from nao_agent.response.parser import EnvelopeError, parse_envelope
@@ -47,6 +48,12 @@ class ChatBridgeNode(Node):
         self.declare_parameter("motion_service", MOTION_SERVICE)
         self.declare_parameter("temp", 0.2)
         self.declare_parameter("server_wait_sec", 5.0)
+        # Conversation memory (in-process only, restart clears it):
+        # last `history_turns` exchanges, each message clipped to
+        # `history_msg_chars` so one long prompt cannot evict the
+        # system prompt from the model's context window.
+        self.declare_parameter("history_turns", 6)
+        self.declare_parameter("history_msg_chars", 500)
 
         prompt_topic = self.get_parameter("prompt_topic").value
         speech_topic = self.get_parameter("speech_topic").value
@@ -62,6 +69,10 @@ class ChatBridgeNode(Node):
         self._system_prompt = raw_prompt + "\n" + action_list_fragment()
         self._temp = float(self.get_parameter("temp").value)
         self._server_wait = float(self.get_parameter("server_wait_sec").value)
+        self._history_turns = max(0, int(self.get_parameter("history_turns").value))
+        self._history_chars = max(0, int(self.get_parameter("history_msg_chars").value))
+        # (role, text) pairs, oldest first; maxlen evicts oldest automatically.
+        self._history: deque = deque(maxlen=2 * self._history_turns)
         self._grammar_schema = self._load_schema(
             self.get_parameter("response_schema_file").value
         )
@@ -91,7 +102,12 @@ class ChatBridgeNode(Node):
             self._busy = True
 
         self.get_logger().info(f"Prompt: {text[:120]}")
-        messages = build_messages(self._system_prompt, text)
+        clipped = clip_text(text, self._history_chars)
+        with self._lock:
+            history = list(self._history)
+            if self._history_turns > 0:
+                self._history.append(("user", clipped))
+        messages = build_messages(self._system_prompt, clipped, history)
         goal = self._llm.make_goal(
             messages, temp=self._temp, grammar_schema=self._grammar_schema
         )
@@ -143,6 +159,16 @@ class ChatBridgeNode(Node):
                 self.get_logger().warn("LLM returned no actions")
                 self._release()
                 return
+            # Remember what the robot actually said (speak texts only,
+            # never the raw JSON envelope) for the next turns.
+            spoken = " ".join(
+                (a.text or "").strip()
+                for a in response.actions
+                if a.name == SPEAK_ACTION and (a.text or "").strip()
+            )
+            if spoken and self._history_turns > 0:
+                with self._lock:
+                    self._history.append(("assistant", clip_text(spoken, self._history_chars)))
             thread = threading.Thread(
                 target=self._run_sequence, args=(response,), daemon=True
             )

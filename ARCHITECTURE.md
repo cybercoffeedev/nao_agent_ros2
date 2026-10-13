@@ -98,7 +98,8 @@ flowchart LR
 ```
 
 Data flow: a test prompt injected on `/prompt` is wrapped into
-`messages[]` (system + user) and sent as a `GenerateChatCompletions` goal
+`messages[]` (system + recent history + user) and sent as a
+`GenerateChatCompletions` goal
 constrained by `grammar_schema` to an ordered step list (`speak` texts and
 named motion actions). The bridge walks the steps in a sequence runner:
 speak steps publish to `/speech` (raw JSON never reaches speech), motion
@@ -116,7 +117,10 @@ to the prompt topic, drives the LLM action client through its callback
 chain, then walks the ordered steps in a sequence runner (speak publishes,
 motion goes through the motion service client with a future wait, abort
 on failure). Holds no LLM/NAOqi logic itself — that lives in the `llm/`,
-`response/`, `motion/` and `speech/` adapters.
+`response/`, `motion/` and `speech/` adapters. Keeps a short
+conversation memory: the last `history_turns` exchanges (each message
+clipped to `history_msg_chars`) are prepended to every goal;
+in-process only, a restart forgets everything.
 
 Technologies: Python, rclpy, rclpy.action
 
@@ -367,7 +371,7 @@ Repository URL: https://github.com/cybercoffeedev/nao_agent_ros2
 
 Primary Contact/Team: cybercoffeedev
 
-Date of Last Update: 2026-10-12
+Date of Last Update: 2026-10-13
 
 ## 11. Glossary / Acronyms
 

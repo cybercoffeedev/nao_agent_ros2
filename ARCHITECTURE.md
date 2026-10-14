@@ -480,6 +480,14 @@ declared as test dependencies.
   verification that `naoqi-bin` synthesizes the event).
 - Persistent test suite under `test/` (goal building, speaker
   with a mocked publisher).
+- Driver fork (last concrete item, after multilingual + LLaVA):
+  upstream `naoqi_driver2` has no TTS language selection (Polish is
+  phoneticized through the default voice on hardware) and fires `say()`
+  fire-and-forget (overlapping utterances outrun the echo-gate timing
+  estimate). Fork or patch it to set the `ALTextToSpeech` language per
+  interaction language and queue utterances. Until then the time-window
+  echo gate (`sec_per_char` + margin) is the only buffer — tune it, don't
+  assume exact speech timing.
 - VLA control (research track, last): once the agent is complete,
   experiments with a vision-language-action policy are planned in a
   separate repository (new ROS package in the same workspace, talking to

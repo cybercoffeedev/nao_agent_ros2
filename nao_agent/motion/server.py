@@ -30,9 +30,16 @@ class MotionServerNode(Node):
     def __init__(self) -> None:
         super().__init__("motion_server_node")
         self.declare_parameter("nao_ip", "127.0.0.1")
-        self.declare_parameter("nao_port", 9559)
-        nao_ip = self.get_parameter("nao_ip").value
-        nao_port = int(self.get_parameter("nao_port").value)
+        # Declared without a default on purpose: launch passes strings
+        # ("9559"), CLI passes ints (9559); both coerce below.
+        self.declare_parameter("nao_port")
+        nao_ip = str(self.get_parameter("nao_ip").value)
+        try:
+            nao_port = int(self.get_parameter("nao_port").value)
+        except (TypeError, ValueError) as e:
+            raise RuntimeError(
+                f"Bad `nao_port` param (need e.g. 9559): {e}"
+            ) from e
         self._motion = PostureExecutor(lambda: connect_qi(nao_ip, nao_port))
         self._qi_connect = lambda: connect_qi(nao_ip, nao_port)
         self._eyes = None

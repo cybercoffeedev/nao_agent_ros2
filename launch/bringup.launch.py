@@ -43,6 +43,11 @@ def generate_launch_description():
         ),
         launch_arguments={
             "params_file": params_file,
+            # Pin the namespace: launch configurations are context-global
+            # (first declaration wins), so without this the `namespace`
+            # arg declared by naoqi_driver.launch.py would silently push
+            # llama_node into /naoqi_driver instead of /llama.
+            "namespace": "llama",
         }.items(),
     )
 

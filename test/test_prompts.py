@@ -94,7 +94,10 @@ def test_clip_short_text_unchanged():
 
 
 def test_clip_long_text_marked():
-    assert clip_text("abcdef", 4) == "abcd" + TRUNCATION_MARKER
+    clipped = clip_text("abcdef", 4)
+    assert clipped == TRUNCATION_MARKER
+    assert len(clip_text("abcdefghij", 9)) <= 9
+    assert clip_text("abcdefghij", 9) == "abcd" + TRUNCATION_MARKER
 
 
 def test_clip_non_positive_limit_disables():

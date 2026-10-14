@@ -10,14 +10,15 @@ TRUNCATION_MARKER = "[...]"
 
 
 def clip_text(text: str, limit: int) -> str:
-    """Clip a history message to `limit` chars (history fuse).
+    """Clip a history message to `limit` chars total (history fuse).
 
     A non-positive limit disables clipping. Overlong text is cut and
-    marked so the model knows it was truncated.
+    marked so the model knows it was truncated; the marker counts
+    towards the limit.
     """
     text = (text or "").strip()
     if limit > 0 and len(text) > limit:
-        return text[:limit].rstrip() + TRUNCATION_MARKER
+        return text[: max(0, limit - len(TRUNCATION_MARKER))].rstrip() + TRUNCATION_MARKER
     return text
 
 

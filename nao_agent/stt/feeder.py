@@ -20,10 +20,10 @@ import threading
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
-from rclpy.qos import QoSPresetProfiles
+from rclpy.qos import DurabilityPolicy, QoSProfile, QoSPresetProfiles, ReliabilityPolicy
 from std_msgs.msg import Bool, String
 
-from audio_common_msgs.msg import Audio, AudioData, AudioInfo, AudioStamped
+from audio_common_msgs.msg import AudioStamped
 from naoqi_bridge_msgs.msg import AudioBuffer
 from naoqi_bridge_msgs.srv import SetString
 from whisper_msgs.action import STT
@@ -85,7 +85,14 @@ class SttFeederNode(Node):
         self._pub_prompt = self.create_publisher(String, self._prompt_topic, 10)
         self.create_subscription(AudioBuffer, audio_topic, self._on_audio, 10)
         self.create_subscription(String, speech_topic, self._on_speech, 10)
-        self.create_subscription(Bool, busy_topic, self._on_busy, 10)
+        # Latched to match the bridge publisher: a (re)start mid-inference
+        # still sees the current busy state.
+        latched = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+        self.create_subscription(Bool, busy_topic, self._on_busy, latched)
         self._stt = ActionClient(self, STT, stt_action)
         self._eyes = self.create_client(SetString, eyes_service)
         # Watchdog re-arms the listen goal after failures; _send_listen
@@ -157,12 +164,13 @@ class SttFeederNode(Node):
         except Exception as e:  # noqa: BLE001 - eyes must not break the flow
             self.get_logger().debug(f"Eyes call failed: {e}")
 
-    def _send_listen(self) -> None:
+    def _send_listen(self, server_wait: float | None = None) -> None:
         with self._lock:
             if self._goal_active or self._busy:
                 return
             self._goal_active = True
-        if not self._stt.wait_for_server(timeout_sec=self._server_wait):
+        wait = self._server_wait if server_wait is None else server_wait
+        if not self._stt.wait_for_server(timeout_sec=wait):
             self.get_logger().warn(
                 "STT action unavailable, watchdog will retry "
                 "(check `ros2 action list` for the listen server)"
@@ -202,6 +210,7 @@ class SttFeederNode(Node):
             audio_time = transcription_time = 0.0
         now = self._now()
         with self._lock:
+            busy = self._busy
             self._goal_active = False
             self._goal_handle = None
             start, end = capture_window(now, audio_time, transcription_time)
@@ -214,6 +223,10 @@ class SttFeederNode(Node):
             self.get_logger().debug("STT returned empty text, listening on")
         elif is_hallucination(text):
             self.get_logger().info(f"Dropping non-speech tag: {text[:40]}")
+        elif busy:
+            # Slipped through the busy barrier (goal sent just before the
+            # flag arrived): never feed inference-time speech back in.
+            self.get_logger().debug("Dropping transcription while bridge busy")
         elif echo:
             self.get_logger().info("Dropping own-speech transcription (echo gate)")
         else:
@@ -230,7 +243,7 @@ class SttFeederNode(Node):
     def _on_watchdog(self) -> None:
         # Zero-wait probe so a missing server never stalls audio shaping.
         if self._stt.wait_for_server(timeout_sec=0.0):
-            self._send_listen()
+            self._send_listen(server_wait=0.0)
 
 
 def main(args=None) -> None:

@@ -46,6 +46,7 @@ class Eyes:
         with self._lock:
             self._mode = mode
             self._step = 0
+            self._error_logged = False
             if mode is not None and (
                 self._thread is None or not self._thread.is_alive()
             ):
@@ -62,7 +63,10 @@ class Eyes:
     def _join(self) -> None:
         thread, self._thread = self._thread, None
         if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=2.0 * TICK_SEC)
+            # Unbounded: the loop exits right after its in-flight write,
+            # so stop() can never strand a second animator next to the
+            # ("FaceLeds", 1.0) restore below.
+            thread.join()
 
     def _loop(self) -> None:
         while True:

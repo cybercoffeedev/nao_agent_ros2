@@ -170,6 +170,12 @@ messages and crashes the backend otherwise). Each message is clipped to
 
 Technologies: Python, rclpy, rclpy.action
 
+Single-flight covers the whole sequence, with a turn counter so a stale
+callback can never clear a newer turn. An LLM goal with no result within
+`llm_timeout_sec` is cancelled by a watchdog (a dead backend cannot wedge
+the bridge busy). Conversation memory is recorded after the sequence
+runs, holding only replies the robot actually spoke.
+
 Deployment: ROS 2 node launched via `bringup.launch.py`; also runnable
 standalone with `ros2 run nao_agent chat_bridge_node --ros-args --params-file ...`
 
@@ -267,7 +273,8 @@ itself); each transcription is published on `/prompt` unless it holds
 only bracketed non-speech tags (hallucination filter) or pure `gate.py`
 reports our own `/speech` (recording-window overlap with the inhibit
 window, or still inhibited at result time). While the bridge reports busy
-on `/agent/busy` the feeder cancels its listen goal and sends nothing.
+on `/agent/busy` the feeder cancels its listen goal and sends nothing;
+a transcription that still slips through is dropped at result time.
 Tuning lives in the `stt_feeder_node:` section of `config/params.yaml`.
 A watchdog timer re-arms the goal after failures
 without stalling audio forwarding. Covered by `test/test_stt_audio.py`
@@ -310,7 +317,7 @@ driver; `/audio` carries mic buffers from the driver
 (`audio_common_msgs/AudioStamped`, sensor-data QoS);
 the chat action carries goals/results including streaming feedback; the
 STT action carries one listen goal per utterance; the `/agent/busy` flag
-(`std_msgs/Bool`, true while the bridge processes a prompt) pauses the
+(`std_msgs/Bool`, latched, true while the bridge processes a prompt) pauses the
 feeder's listen goals; the services carry
 motion goals and eye-mode switches (`naoqi_bridge_msgs/srv/SetString`).
 
@@ -344,8 +351,8 @@ Purpose: Local LLM inference backend (chat completions only — that is
 all the bridge uses).
 
 Integration Method: ROS 2 action `GenerateChatCompletions`
-(deployed server `/naoqi_driver/generate_chat_completions` via the
-`llama_action` param; code default `/llama/generate_chat_completions`).
+(server `/llama/generate_chat_completions` as launched by stock bringup;
+override via the `llama_action` param).
 
 naoqi_driver2 (`naoqi_driver_node`)
 

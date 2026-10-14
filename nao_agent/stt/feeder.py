@@ -9,7 +9,7 @@ Flow:
 
 The listen loop is a single chained STT goal (the server single-flights
 itself); it pauses while the bridge reports busy on /agent/busy (no
-prompts during inference, no busy-spam) and shows the listening eyes then.
+prompts during inference, no busy-spam).
 A failed send is retried by the watchdog so audio forwarding never blocks.
 Utterance text selection and shaping live in the pure stt/audio and
 stt/gate modules.
@@ -96,8 +96,7 @@ class SttFeederNode(Node):
             f"+ {stt_action} -> {self._prompt_topic} (gated by {speech_topic})"
         )
         self._send_listen()
-        # Clean slate: a turquoise left by a previous run would otherwise
-        # suggest someone is speaking.
+        # Clean slate: clear any thinking comet left by a previous run.
         self._set_eyes("")
 
     def _now(self) -> float:

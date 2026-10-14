@@ -3,7 +3,7 @@
 Exposes PostureExecutor (direct qi session) as
 `/nao_agent/go_to_posture` (naoqi_bridge_msgs/srv/SetString: action name
 in, success out), plus the thinking-eyes animation as
-`/nao_agent/set_eyes` (SetString: "thinking"/"listening"/"" in, success out).
+`/nao_agent/set_eyes` (SetString: "thinking"/"" in, success out).
 Runs on a single-threaded executor and keeps one qi session referenced:
 proxies die with their session (GC closes the socket, later writes fail),
 so the session must be born on the main thread and stay alive as long as

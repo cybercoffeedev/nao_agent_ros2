@@ -33,7 +33,7 @@ It is a living document — update it as the codebase evolves.
 │   │   ├── gate.py           # Pure echo-gate timing (deaf while speaking)
 │   │   └── feeder.py         # ROS node: audio forward + STT loop -> /prompt
 ├── config/
-│   ├── params.yaml           # Single config: `chat_bridge_node:`, `motion_server_node:` + `/**:` model block
+│   ├── params.yaml           # Single config: bridge, motion, stt_feeder sections + `/**:` model block
 │   ├── whisper.yaml          # STT params (own file: `/**:` would shadow `model.*`)
 │   └── grammar/
 │       └── response.json     # JSON Schema compiled to GBNF (envelope shape)
@@ -119,6 +119,8 @@ flowchart LR
     Whisper -- "Transcription text" --> Loop
     Loop -- "/prompt, dropped while /speech may play" --> P
     S -. "inhibit window per utterance" .-> Gate
+    Bridge -- "busy flag" --> B((topic /agent/busy))
+    B -. "pause listen goals" .-> Loop
     SvcClient -- "SetString service /nao_agent/go_to_posture" --> MotionSvc{<b>motion_server_node</b>\n<i>server.py and posture_executor.py</i>\nservice front, guard, dispatch}
     SvcClient -. "SetString /nao_agent/set_eyes (thinking on/off)" .-> MotionSvc
     MotionSvc -- "goToPosture and angleInterpolation, own qi session" --> Motion[ALRobotPosture and ALMotion]
@@ -141,6 +143,12 @@ chains single-utterance `STT` goals (VAD-gated inside whisper_ros) and
 publishes each transcription on `/prompt` unless our own `/speech` may
 still be playing (half-duplex echo gate: the robot is deaf while it
 speaks, since its own TTS would otherwise be transcribed back).
+A transcription is also dropped when it holds only bracketed non-speech
+tags (hallucination filter); the echo check compares the recording
+window against the inhibit window, not just the result arrival time.
+While the bridge processes a prompt it publishes `/agent/busy` and the
+feeder pauses (cancels) its listen goal meanwhile, so nothing is
+transcribed during inference.
 
 ## 3. Core Components
 
@@ -255,9 +263,13 @@ integer-ratio decimation to 16 kHz, int16 clamp) as `AudioStamped` on
 `/audio/in` with sensor-data QoS (silero subscribes best-effort; a
 reliable publisher would silently never match). Chains single-utterance
 `STT` goals on `/whisper/listen` (the server VAD-gates and single-flights
-itself); each transcription is published on `/prompt` unless pure
-`gate.py` still inhibits it after our own `/speech` (time window per
-utterance length). A watchdog timer re-arms the goal after failures
+itself); each transcription is published on `/prompt` unless it holds
+only bracketed non-speech tags (hallucination filter) or pure `gate.py`
+reports our own `/speech` (recording-window overlap with the inhibit
+window, or still inhibited at result time). While the bridge reports busy
+on `/agent/busy` the feeder cancels its listen goal and sends nothing.
+Tuning lives in the `stt_feeder_node:` section of `config/params.yaml`.
+A watchdog timer re-arms the goal after failures
 without stalling audio forwarding. Covered by `test/test_stt_audio.py`
 and `test/test_stt_gate.py` with no ROS.
 
@@ -269,11 +281,12 @@ Name: `bringup.launch.py`
 
 Description: Declares `nao_ip`, `nao_port`, `params_file`
 (default `config/params.yaml`, holding the `chat_bridge_node:`,
-`motion_server_node:` and `/**:` model blocks) and `whisper_params_file`
+`motion_server_node:`, `stt_feeder_node:` and `/**:` model blocks) and `whisper_params_file`
 (default `config/whisper.yaml`, holding the `/whisper/*` blocks — kept
 separate because `/**:` would shadow whisper's own `model.*` keys) and
 includes `naoqi_driver.launch.py`, `llama_bringup/base.launch.py`,
-`whisper_bringup/whisper.launch.py` (host-mic capturer off: audio comes
+`whisper_bringup/whisper.launch.py` (same file as both whisper and
+silero params, host-mic capturer off: audio comes
 from the driver) plus the `chat_bridge_node`, `motion_server_node` and
 `stt_feeder_node`.
 
@@ -283,7 +296,7 @@ Technologies: ROS 2 Launch (Python)
 
 ### 4.1. ROS graph (transient transport)
 
-Name: Topics `/prompt`, `/speech`, `/audio`, `/audio/in`; actions
+Name: Topics `/prompt`, `/speech`, `/audio`, `/audio/in`, `/agent/busy`; actions
 `generate_chat_completions`, `STT` (`/whisper/listen`);
 services `/nao_agent/go_to_posture`, `/nao_agent/set_eyes`
 
@@ -296,10 +309,12 @@ driver; `/audio` carries mic buffers from the driver
 `/audio/in` carries reshaped mono audio to silero
 (`audio_common_msgs/AudioStamped`, sensor-data QoS);
 the chat action carries goals/results including streaming feedback; the
-STT action carries one listen goal per utterance; the services carry
+STT action carries one listen goal per utterance; the `/agent/busy` flag
+(`std_msgs/Bool`, true while the bridge processes a prompt) pauses the
+feeder's listen goals; the services carry
 motion goals and eye-mode switches (`naoqi_bridge_msgs/srv/SetString`).
 
-Key Schemas/Collections: `std_msgs/msg/String`,
+Key Schemas/Collections: `std_msgs/msg/String`, `std_msgs/msg/Bool`,
 `llama_msgs/action/GenerateChatCompletions`,
 `llama_msgs/msg/ChatMessage`,
 `whisper_msgs/action/STT`, `whisper_msgs/msg/Transcription`,
@@ -419,6 +434,7 @@ Testing Frameworks: `pytest` matrices (`test/test_parser.py`,
 `test/test_action_parity.py`,
 `test/test_posture_executor.py`,
 `test/test_prompts.py`,
+`test/test_eyes.py`,
 `test/test_stt_audio.py`,
 `test/test_stt_gate.py`); manual smoke checks (`make_goal` with
 grammar, node init/destroy, envelope + motion E2E in the simulator).
@@ -473,7 +489,7 @@ Repository URL: https://github.com/cybercoffeedev/nao_agent_ros2
 
 Primary Contact/Team: cybercoffeedev
 
-Date of Last Update: 2026-10-13
+Date of Last Update: 2026-10-14
 
 ## 11. Glossary / Acronyms
 

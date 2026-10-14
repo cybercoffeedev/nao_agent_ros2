@@ -2,12 +2,7 @@
 
 import time
 
-from nao_agent.motion.eyes import (
-    EYES_SERVICE,
-    TURQUOISE_HEX,
-    Eyes,
-    LED_INTENSITIES,
-)
+from nao_agent.motion.eyes import EYES_SERVICE, Eyes, LED_INTENSITIES
 
 
 class FakeLeds:
@@ -16,9 +11,6 @@ class FakeLeds:
 
     def setIntensity(self, name, value):
         self.calls.append((name, value))
-
-    def fadeRGB(self, name, color, duration):
-        self.calls.append((name, color, duration))
 
 
 class FakeBlink:
@@ -80,20 +72,6 @@ def test_double_start_keeps_single_thread():
 
 def test_eyes_service_name():
     assert EYES_SERVICE == "/nao_agent/set_eyes"
-
-
-def test_listening_shows_turquoise_until_stopped():
-    leds = FakeLeds()
-    eyes = Eyes(leds)
-    assert eyes.set("listening") is True
-    time.sleep(0.25)
-    fades = [c for c in leds.calls if len(c) == 3]
-    assert fades, "listening must fade the face LEDs"
-    assert all(name == "FaceLeds" and color == TURQUOISE_HEX for name, color, _ in fades)
-    assert eyes.set("") is True
-    assert leds.calls[-1] == ("FaceLeds", 1.0)
-    thread = eyes._thread
-    assert thread is None or not thread.is_alive()
 
 
 class FailingLeds:

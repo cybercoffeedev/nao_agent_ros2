@@ -4,14 +4,16 @@ Exposes PostureExecutor (direct qi session) as
 `/nao_agent/go_to_posture` (naoqi_bridge_msgs/srv/SetString: action name
 in, success out), plus the thinking-eyes animation as
 `/nao_agent/set_eyes` (SetString: "thinking"/"" in, success out).
-Blocking NAOqi calls run on a multithreaded executor so
-one motion never stalls discovery, parameters or shutdown.
+Runs on a single-threaded executor and keeps one qi session referenced:
+proxies die with their session (GC closes the socket, later writes fail),
+so the session must be born on the main thread and stay alive as long as
+its proxies are used; a long motion briefly stalls other callbacks.
 """
 
 import threading
 
 import rclpy
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 
 from naoqi_bridge_msgs.srv import SetString
@@ -34,6 +36,10 @@ class MotionServerNode(Node):
         self._motion = PostureExecutor(lambda: connect_qi(nao_ip, nao_port))
         self._qi_connect = lambda: connect_qi(nao_ip, nao_port)
         self._eyes = None
+        # Owns the eyes qi session: proxies die with it (GC closes the
+        # socket, then every later write fails), so it must stay referenced
+        # as long as self._eyes is used.
+        self._qi_session = None
         self._eyes_lock = threading.Lock()
         self.create_service(
             SetString,
@@ -72,7 +78,11 @@ class MotionServerNode(Node):
                     blinking = session.service("ALAutonomousBlinking")
                 except Exception:  # noqa: BLE001 - sim may lack the service
                     blinking = None
-                self._eyes = Eyes(leds, blinking)
+                self._eyes = Eyes(leds, blinking, on_error=self.get_logger().warn)
+                # Keep the session referenced: dropping it closes the socket
+                # under the still-cached proxies (every later write then
+                # fails with "Socket is not connected").
+                self._qi_session = session
             except Exception as e:  # noqa: BLE001 - robot unreachable
                 self.get_logger().warn(f"Eyes unavailable: {e}")
                 return None
@@ -95,7 +105,7 @@ class MotionServerNode(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = MotionServerNode()
-    executor = MultiThreadedExecutor(num_threads=2)
+    executor = SingleThreadedExecutor()
     executor.add_node(node)
     try:
         executor.spin()

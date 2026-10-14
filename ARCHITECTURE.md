@@ -175,8 +175,11 @@ Description: The ROS driver does not expose ALRobotPosture, so motion is
 a first-class ROS service in our own package instead of a side channel:
 `motion_server_node` serves `/nao_agent/go_to_posture`
 (`naoqi_bridge_msgs/srv/SetString`: action name in, success out) on a
-multithreaded executor and runs the
-blocking NAOqi calls there.
+single-threaded executor and runs the
+blocking NAOqi calls there (single thread is required: qi proxies die
+with their session, so each session must be born on the main thread and
+stay referenced while its proxies are used; a long motion briefly stalls
+other callbacks).
 `PostureExecutor` underneath only guards (single writer on ALMotion) and
 dispatches registered `@action` handlers over its own qi session to the
 same robot (concurrent sessions are allowed). The bridge is a plain

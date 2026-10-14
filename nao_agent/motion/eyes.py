@@ -22,8 +22,12 @@ LED_INTENSITIES = (1.0, 0.6, 0.2, 0.0)
 class Eyes:
     """Background FaceLed animation; at most one mode at a time."""
 
-    def __init__(self, leds, blinking=None) -> None:
+    def __init__(self, leds, blinking=None, on_error=None) -> None:
         self._leds = leds
+        # Called once with the first background write failure (never spams);
+        # lets the caller surface silent NAOqi errors in its own logs.
+        self._on_error = on_error
+        self._error_logged = False
         try:
             if blinking is not None:
                 blinking.setEnabled(False)
@@ -72,6 +76,11 @@ class Eyes:
                     self._leds.setIntensity(
                         self._led_names[(step - i) % FACE_LEDS_COUNT], intensity
                     )
-            except Exception:  # noqa: BLE001 - keep animating through blips
-                pass
+            except Exception as e:  # noqa: BLE001 - keep animating through blips
+                if self._on_error is not None and not self._error_logged:
+                    self._error_logged = True
+                    try:
+                        self._on_error(f"Eyes animation write failed: {e}")
+                    except Exception:
+                        pass
             time.sleep(TICK_SEC)

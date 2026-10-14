@@ -5,8 +5,9 @@ own qi session to the same robot (NAOqi allows concurrent sessions).
 
 Handlers live in actions.py and self-register with @action; the executor
 only guards (single writer on ALMotion) and dispatches by name. Calls are
-blocking — run them off the ROS executor thread (service server with a
-multithreaded executor, or a worker thread).
+blocking and open their qi session on the caller's thread, so call run()
+on the main thread (e.g. a single-threaded executor callback): sessions
+born off the main thread while ROS spins end up with dead sockets.
 """
 
 import threading
@@ -40,7 +41,7 @@ class PostureExecutor:
         self._moving = False
 
     def run(self, action: str) -> str:
-        """Run an action synchronously (caller must use a worker thread)."""
+        """Run an action synchronously on the main thread (see module docs)."""
         with self._lock:
             if self._moving:
                 raise MotionError("motion busy")

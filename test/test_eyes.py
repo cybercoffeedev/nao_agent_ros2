@@ -75,3 +75,18 @@ def test_double_start_keeps_single_thread():
 
 def test_eyes_service_name():
     assert EYES_SERVICE == "/nao_agent/set_eyes"
+
+
+class FailingLeds:
+    def setIntensity(self, name, value):
+        raise RuntimeError("nope")
+
+
+def test_loop_reports_first_write_error_once():
+    errors = []
+    eyes = Eyes(FailingLeds(), on_error=errors.append)
+    assert eyes.set("thinking") is True
+    time.sleep(0.35)
+    assert eyes.set("") is True
+    assert len(errors) == 1
+    assert "nope" in errors[0]

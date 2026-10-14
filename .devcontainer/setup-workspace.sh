@@ -1,7 +1,7 @@
 #!/bin/bash
 # First-create workspace bootstrap for the nao_agent_ros2 dev container.
 # Recreates the canonical layout next to this package:
-#   /home/ws/src/{nao_agent_ros2 (bind mount),llama_ros,naoqi_driver2}
+#   /home/ws/src/{nao_agent_ros2 (bind mount),llama_ros,whisper_ros,audio_common,naoqi_driver2}
 # then resolves deps and builds the full workspace (libqi wheel is baked
 # into the image; here we only verify it imports).
 # Safe to re-run: every step skips when already done.
@@ -11,7 +11,7 @@ WS=/home/ws
 PKG_DIR=/home/ws/src/nao_agent_ros2
 export PATH="$HOME/.local/bin:$PATH"
 
-echo "==> 1/4 sibling checkouts (llama_ros, naoqi_driver2)"
+echo "==> 1/4 sibling checkouts (llama_ros, whisper_ros, audio_common, naoqi_driver2)"
 # Wrapper first so later steps can use short commands. Single-target -D
 # form: cannot misfire into multi-source mode.
 sudo install -D -m 755 "$PKG_DIR/.devcontainer/bin/choregraphe" /usr/local/bin/choregraphe
@@ -22,7 +22,8 @@ sudo install -d -o "$(whoami)" -g "$(whoami)" \
 # The bind mount only covers this package; the parents are daemon-created
 # root-owned, so claim them before vcs/colcon write next to us.
 sudo install -d -o "$(whoami)" -g "$(whoami)" "$WS" "$WS/src"
-if [ -d "$WS/src/llama_ros/.git" ] && [ -d "$WS/src/naoqi_driver2/.git" ]; then
+if [ -d "$WS/src/llama_ros/.git" ] && [ -d "$WS/src/whisper_ros/.git" ] \
+    && [ -d "$WS/src/audio_common/.git" ] && [ -d "$WS/src/naoqi_driver2/.git" ]; then
     echo "siblings present, skipping clone"
     echo "(pinned versions; git pull inside to update, or drop the src volumes)"
 else

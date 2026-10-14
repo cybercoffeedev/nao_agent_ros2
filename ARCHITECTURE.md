@@ -27,18 +27,26 @@ It is a living document — update it as the codebase evolves.
 │   └── speech/               # Speech adapter layer (no LLM knowledge)
 │       ├── __init__.py
 │       └── speaker.py        # Adapter for /speech -> ALTextToSpeech
+│   ├── stt/                  # Voice input (no LLM knowledge)
+│   │   ├── __init__.py
+│   │   ├── audio.py          # Pure AudioBuffer -> mono 16 kHz shaping
+│   │   ├── gate.py           # Pure echo-gate timing (deaf while speaking)
+│   │   └── feeder.py         # ROS node: audio forward + STT loop -> /prompt
 ├── config/
 │   ├── params.yaml           # Single config: `chat_bridge_node:`, `motion_server_node:` + `/**:` model block
+│   ├── whisper.yaml          # STT params (own file: `/**:` would shadow `model.*`)
 │   └── grammar/
 │       └── response.json     # JSON Schema compiled to GBNF (envelope shape)
 ├── launch/
-│   └── bringup.launch.py     # System composition: driver + LLM + bridge
+│   └── bringup.launch.py     # System composition: driver + LLM + STT + bridge
 ├── test/
 │   ├── test_parser.py        # pytest matrix for the envelope parser
 │   ├── test_action_parity.py # registry/schema enum parity guard
 │   ├── test_eyes.py          # eye animator tests with fake ALLeds
 │   ├── test_posture_executor.py # executor tests with fake qi services
-│   └── test_prompts.py       # pytest matrix for the pure prompt builder
+│   ├── test_prompts.py       # pytest matrix for the pure prompt builder
+│   ├── test_stt_audio.py     # pytest matrix for the STT audio shaping
+│   └── test_stt_gate.py      # pytest matrix for the echo-gate timing
 ├── resource/nao_agent        # ament package marker (do not touch)
 ├── .devcontainer/            # reproducible dev container (own workspace bootstrap)
 │   ├── devcontainer.json     # mounts this repo at /home/ws/src/nao_agent_ros2
@@ -46,8 +54,8 @@ It is a living document — update it as the codebase evolves.
 │   ├── setup-workspace.sh    # siblings, rosdep, full build (wheel pre-baked)
 │   ├── start-sim.sh          # autostart naoqi-bin, pins NAO V6 robot model
 │   └── bin/choregraphe       # one-word GUI launcher (needs forwarded X11)
-├── dependencies.repos        # vcstool sources: naoqi_driver2, llama_ros
-├── package.xml               # Package manifest (depends: rclpy, std_msgs, llama_msgs, naoqi_bridge_msgs)
+├── dependencies.repos        # vcstool sources: naoqi_driver2, llama_ros, whisper_ros, audio_common
+├── package.xml               # Package manifest (depends: rclpy, std_msgs, llama_msgs, naoqi_bridge_msgs, audio_common_msgs, whisper_msgs)
 ├── setup.py                  # Build config + console_scripts entry points
 ├── setup.cfg                 # Script install dir
 ├── README.md                 # Package stub (see ARCHITECTURE.md for docs)
@@ -61,6 +69,8 @@ External (sibling source checkouts, not part of this repo):
 ```text
 src/
 ├── llama_ros/                # LLM backend (llama_node, llama_msgs, llama_bringup)
+├── whisper_ros/              # STT backend (whisper_node, silero VAD, whisper_msgs, whisper_bringup)
+├── audio_common/             # AudioStamped message definitions (mgonzs13 fork)
 └── naoqi_driver2/            # NAOqi <-> ROS 2 driver (naoqi_driver_node)
 ```
 
@@ -74,6 +84,14 @@ flowchart LR
     Launch[<b>bringup.launch.py</b>\n<i>launch</i>\nstarts nodes, passes params_file] -.-> Client
     Launch -.-> Llama
     Launch -.-> Driver
+    Launch -.-> Whisper
+    Launch -.-> Feeder
+
+    subgraph STT [<b>STT Feeder Node</b>\n<i>stt/feeder.py</i>\nmic to prompt]
+        Shape[<b>audio shaping</b>\n<i>stt/audio.py</i>\npure function - front mono 16 kHz]
+        Gate[<b>echo gate</b>\n<i>stt/gate.py</i>\npure function - deaf while speaking]
+        Loop[<b>listen loop</b>\n<i>stt/feeder.py</i>\nSTT goal chain, watchdog retry]
+    end
 
     subgraph Bridge [<b>Chat Bridge Node</b>\n<i>chat_bridge_node.py</i>\nComposition Root]
         Client[<b>ChatClient</b>\n<i>chat_client.py</i>\nAdapter - make_goal and extract_text]
@@ -95,6 +113,12 @@ flowchart LR
     Speaker -- "speak text only" --> S((topic /speech))
     S --> Driver{<b>naoqi_driver_node</b>\nnaoqi_driver2}
     Driver -- "say text" --> TTS[ALTextToSpeech]
+    Driver -- "AudioBuffer /audio (48 kHz 4ch mics)" --> Shape
+    Shape -- "AudioStamped /audio/in (mono 16 kHz)" --> Whisper{<b>whisper + silero</b>\nwhisper_ros}
+    Loop -- "STT goal /whisper/listen (one utterance)" --> Whisper
+    Whisper -- "Transcription text" --> Loop
+    Loop -- "/prompt, dropped while /speech may play" --> P
+    S -. "inhibit window per utterance" .-> Gate
     SvcClient -- "SetString service /nao_agent/go_to_posture" --> MotionSvc{<b>motion_server_node</b>\n<i>server.py and posture_executor.py</i>\nservice front, guard, dispatch}
     SvcClient -. "SetString /nao_agent/set_eyes (thinking on/off)" .-> MotionSvc
     MotionSvc -- "goToPosture and angleInterpolation, own qi session" --> Motion[ALRobotPosture and ALMotion]
@@ -111,18 +135,25 @@ speak steps publish to `/speech` (raw JSON never reaches speech), motion
 steps run to completion one by one (own qi session). Single-flight covers
 the whole sequence: a new prompt is dropped while one runs.
 
+Voice path: the NAO microphones stream `AudioBuffer` (48 kHz, 4 channels)
+on `/audio`; the feeder reshapes it to mono 16 kHz on `/audio/in`, then
+chains single-utterance `STT` goals (VAD-gated inside whisper_ros) and
+publishes each transcription on `/prompt` unless our own `/speech` may
+still be playing (half-duplex echo gate: the robot is deaf while it
+speaks, since its own TTS would otherwise be transcribed back).
+
 ## 3. Core Components
 
 ### 3.1. chat_bridge_node
 
 Name: `chat_bridge_node` (`nao_agent/chat_bridge_node.py`)
 
-Description: Composition root and only ROS-aware orchestrator. Subscribes
+Description: Composition root and main conversational orchestrator. Subscribes
 to the prompt topic, drives the LLM action client through its callback
 chain, then walks the ordered steps in a sequence runner (speak publishes,
 motion goes through the motion service client with a future wait, abort
 on failure). Holds no LLM/NAOqi logic itself — that lives in the `llm/`,
-`response/`, `motion/` and `speech/` adapters. Conversation memory: the last `history_turns` exchanges are kept as
+`response/`, `motion/`, `speech/` and `stt/` adapters. Conversation memory: the last `history_turns` exchanges are kept as
 complete user/assistant pairs (failed or empty turns are discarded, so
 the `messages[]` sent to the LLM always alternates user/assistant after
 the system prompt — the Mistral template rejects consecutive same-role
@@ -214,15 +245,37 @@ Description: Publishes plain-text answers on the speech topic consumed by
 
 Technologies: Python, rclpy, std_msgs
 
-### 3.7. Launch composition
+### 3.7. STT feeder + audio shaping (voice input)
+
+Name: `stt_feeder_node` (`nao_agent/stt/`)
+
+Description: Turns microphone stream into prompts. Forwards `/audio`
+(`AudioBuffer`) reshaped by pure `audio.py` (front-mic average to mono,
+integer-ratio decimation to 16 kHz, int16 clamp) as `AudioStamped` on
+`/audio/in` with sensor-data QoS (silero subscribes best-effort; a
+reliable publisher would silently never match). Chains single-utterance
+`STT` goals on `/whisper/listen` (the server VAD-gates and single-flights
+itself); each transcription is published on `/prompt` unless pure
+`gate.py` still inhibits it after our own `/speech` (time window per
+utterance length). A watchdog timer re-arms the goal after failures
+without stalling audio forwarding. Covered by `test/test_stt_audio.py`
+and `test/test_stt_gate.py` with no ROS.
+
+Technologies: Python, rclpy, rclpy.action, audio_common_msgs, whisper_msgs
+
+### 3.8. Launch composition
 
 Name: `bringup.launch.py`
 
 Description: Declares `nao_ip`, `nao_port`, `params_file`
 (default `config/params.yaml`, holding the `chat_bridge_node:`,
-`motion_server_node:` and `/**:` model blocks) and
-includes `naoqi_driver.launch.py`, `llama_bringup/base.launch.py` plus the
-`chat_bridge_node` and `motion_server_node`.
+`motion_server_node:` and `/**:` model blocks) and `whisper_params_file`
+(default `config/whisper.yaml`, holding the `/whisper/*` blocks — kept
+separate because `/**:` would shadow whisper's own `model.*` keys) and
+includes `naoqi_driver.launch.py`, `llama_bringup/base.launch.py`,
+`whisper_bringup/whisper.launch.py` (host-mic capturer off: audio comes
+from the driver) plus the `chat_bridge_node`, `motion_server_node` and
+`stt_feeder_node`.
 
 Technologies: ROS 2 Launch (Python)
 
@@ -230,30 +283,43 @@ Technologies: ROS 2 Launch (Python)
 
 ### 4.1. ROS graph (transient transport)
 
-Name: Topics `/prompt`, `/speech`; action `generate_chat_completions`;
+Name: Topics `/prompt`, `/speech`, `/audio`, `/audio/in`; actions
+`generate_chat_completions`, `STT` (`/whisper/listen`);
 services `/nao_agent/go_to_posture`, `/nao_agent/set_eyes`
 
-Type: ROS 2 DDS topics / action (in-memory, no persistence)
+Type: ROS 2 DDS topics / actions (in-memory, no persistence)
 
-Purpose: `/prompt` carries test-injected user utterances
-(`std_msgs/String`); `/speech` carries LLM answers to the driver;
-the action carries chat goals/results including streaming feedback;
-the services carry motion goals and eye-mode switches
-(`naoqi_bridge_msgs/srv/SetString`).
+Purpose: `/prompt` carries user utterances (`std_msgs/String`, test
+injection or STT feeder output); `/speech` carries LLM answers to the
+driver; `/audio` carries mic buffers from the driver
+(`naoqi_bridge_msgs/AudioBuffer`, published only while subscribed);
+`/audio/in` carries reshaped mono audio to silero
+(`audio_common_msgs/AudioStamped`, sensor-data QoS);
+the chat action carries goals/results including streaming feedback; the
+STT action carries one listen goal per utterance; the services carry
+motion goals and eye-mode switches (`naoqi_bridge_msgs/srv/SetString`).
 
 Key Schemas/Collections: `std_msgs/msg/String`,
 `llama_msgs/action/GenerateChatCompletions`,
 `llama_msgs/msg/ChatMessage`,
+`whisper_msgs/action/STT`, `whisper_msgs/msg/Transcription`,
+`naoqi_bridge_msgs/msg/AudioBuffer`,
+`audio_common_msgs/msg/AudioStamped`,
 `naoqi_bridge_msgs/srv/SetString`
 
 ### 4.2. Model artifacts
 
-Name: GGUF model files (e.g. `bielik-7b-instruct-v0.1.Q4_K_M.gguf`)
+Name: GGUF model files (e.g. `bielik-7b-instruct-v0.1.Q4_K_M.gguf`); whisper
+base weights (`ggml-base.bin`, legacy .bin: the vendored whisper.cpp
+rejects GGUF with bad magic)
 
-Type: Local files, fetched from HuggingFace Hub per `llama_bringup` config
+Type: Local files, fetched from HuggingFace Hub per `llama_bringup` /
+`whisper_bringup` config
 
 Purpose: Weights loaded by `llama_node` at startup; selected via
-`params_file` (`/**:` model block).
+`params_file` (`/**:` model block). Whisper weights loaded by
+`whisper_node` at configure; selected via `whisper_params_file`
+(`config/whisper.yaml`, kept separate so `/**:` cannot shadow it).
 
 ## 5. External Integrations / APIs
 
@@ -269,9 +335,22 @@ Integration Method: ROS 2 action `GenerateChatCompletions`
 naoqi_driver2 (`naoqi_driver_node`)
 
 Purpose: NAOqi <-> ROS 2 bridge; its `SpeechSubscriber` maps
-`/speech` (`std_msgs/String`) to `ALTextToSpeech.say()`.
+`/speech` (`std_msgs/String`) to `ALTextToSpeech.say()`; its audio
+extractor publishes mic buffers on `/audio`
+(`naoqi_bridge_msgs/AudioBuffer`, only while subscribed — the robot calls
+back into a public driver endpoint, so that endpoint must be reachable
+from the robot or extraction silently disables itself).
 
-Integration Method: ROS 2 topic `/speech`.
+Integration Method: ROS 2 topics `/speech` (in) and `/audio` (out).
+
+whisper_ros (`whisper_node` + `silero_vad_node` + `whisper_msgs`)
+
+Purpose: Local STT backend (VAD-gated Polish transcription only — that is
+all the feeder uses). Silero cuts utterances from the audio stream;
+one `STT` goal transcribes one utterance (server single-flights itself).
+
+Integration Method: ROS 2 action `STT` (`/whisper/listen`); audio in on
+`/audio/in` (`audio_common_msgs/AudioStamped`, sensor-data QoS).
 
 NAOqi / naoqi-bin simulator (`ALTextToSpeech`)
 
@@ -339,7 +418,9 @@ one-word launcher (needs X11 forwarding, never autostarted).
 Testing Frameworks: `pytest` matrices (`test/test_parser.py`,
 `test/test_action_parity.py`,
 `test/test_posture_executor.py`,
-`test/test_prompts.py`); manual smoke checks (`make_goal` with
+`test/test_prompts.py`,
+`test/test_stt_audio.py`,
+`test/test_stt_gate.py`); manual smoke checks (`make_goal` with
 grammar, node init/destroy, envelope + motion E2E in the simulator).
 
 Code Quality Tools: `py_compile` gate; `ament_flake8` / `ament_pep257`
@@ -355,16 +436,15 @@ declared as test dependencies.
   are fed per request. Requires camera images from the driver, `mmproj`
   weights in the model config, and a compute check (currently CPU-only
   inference).
-- Real voice input: `whisper_ros` (wrapper over whisper.cpp) STT node
-  consuming the driver's audio topic (`AudioBuffer` extraction, enabled
-  in the driver by default) and publishing transcribed utterances to
-  `/prompt`, replacing test injection. Hearing through the NAO6's
-  built-in microphones requires a physical robot (`naoqi-bin` has no mic
-  input); the STT pipeline itself is testable in simulation with audio
-  files or the host microphone. Prerequisites: the driver's public audio
-  endpoint (port forwarding, otherwise audio extraction is disabled),
-  VAD/utterance segmentation, and echo gating (do not listen while the
-  robot itself is speaking).
+- Real voice input: DONE (base pass) — `whisper_ros` (SileroVAD +
+  whisper.cpp, Polish base model, CPU) consumes the driver's audio topic
+  and the `stt_feeder_node` publishes transcribed utterances to `/prompt`
+  behind a half-duplex echo gate (deaf while `/speech` may play). Hearing
+  needs a physical robot (`naoqi-bin` has no mic input) plus a driver
+  endpoint reachable from the robot, otherwise audio extraction silently
+  disables itself. Leftovers: `TextDone`-precise gating (today: time
+  window per utterance), VAD threshold tuning for fan/servo noise,
+  barge-in (out of scope: no reference signal for AEC on NAO).
 - Multilingual support: parameterize the interaction language instead of
   the hardcoded Polish `system_prompt` (per-language prompt text with the
   matching TTS voice and STT language), selectable via config/param.

@@ -37,7 +37,8 @@ It is a living document — update it as the codebase evolves.
 │   ├── test_parser.py        # pytest matrix for the envelope parser
 │   ├── test_action_parity.py # registry/schema enum parity guard
 │   ├── test_eyes.py          # eye animator tests with fake ALLeds
-│   └── test_posture_executor.py # executor tests with fake qi services
+│   ├── test_posture_executor.py # executor tests with fake qi services
+│   └── test_prompts.py       # pytest matrix for the pure prompt builder
 ├── resource/nao_agent        # ament package marker (do not touch)
 ├── .devcontainer/            # reproducible dev container (own workspace bootstrap)
 │   ├── devcontainer.json     # mounts this repo at /home/ws/src/nao_agent_ros2
@@ -121,10 +122,12 @@ to the prompt topic, drives the LLM action client through its callback
 chain, then walks the ordered steps in a sequence runner (speak publishes,
 motion goes through the motion service client with a future wait, abort
 on failure). Holds no LLM/NAOqi logic itself — that lives in the `llm/`,
-`response/`, `motion/` and `speech/` adapters. Keeps a short
-conversation memory: the last `history_turns` exchanges (each message
-clipped to `history_msg_chars`) are prepended to every goal;
-in-process only, a restart forgets everything.
+`response/`, `motion/` and `speech/` adapters. Conversation memory: the last `history_turns` exchanges are kept as
+complete user/assistant pairs (failed or empty turns are discarded, so
+the `messages[]` sent to the LLM always alternates user/assistant after
+the system prompt — the Mistral template rejects consecutive same-role
+messages and crashes the backend otherwise). Each message is clipped to
+`history_msg_chars`; in-process only, a restart forgets everything.
 
 Technologies: Python, rclpy, rclpy.action
 
@@ -160,10 +163,12 @@ Technologies: Pure Python, JSON Schema, pytest
 
 Name: `prompts` (`nao_agent/llm/prompts.py`)
 
-Description: Framework-free message builder (`build_messages()`); the
-prompt prose lives only in `config/params.yaml` (`system_prompt`), the
-action list is composed at runtime from the `@action` registry, so the
-two cannot drift. Testable without ROS.
+Description: Framework-free message builder (`build_messages()` and
+`sanitize_history()`); the prompt prose lives only in `config/params.yaml`
+(`system_prompt`), the action list is composed at runtime from the
+`@action` registry, so the two cannot drift. Builds a message list that
+always alternates user/assistant after the system prompt, so a past
+failure cannot crash the LLM backend. Testable without ROS.
 
 Technologies: Pure Python
 
@@ -333,7 +338,8 @@ one-word launcher (needs X11 forwarding, never autostarted).
 
 Testing Frameworks: `pytest` matrices (`test/test_parser.py`,
 `test/test_action_parity.py`,
-`test/test_posture_executor.py`); manual smoke checks (`make_goal` with
+`test/test_posture_executor.py`,
+`test/test_prompts.py`); manual smoke checks (`make_goal` with
 grammar, node init/destroy, envelope + motion E2E in the simulator).
 
 Code Quality Tools: `py_compile` gate; `ament_flake8` / `ament_pep257`

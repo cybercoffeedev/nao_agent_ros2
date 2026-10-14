@@ -36,6 +36,15 @@
   test means fixing the code (or the test), never deleting coverage.
 - Do not commit with red tests.
 
+## Code simplicity
+
+- Write the simplest code that does the job: prefer short, idiomatic,
+  readable constructs over clever syntax tricks.
+- Avoid redundancy: no duplicated branches, no dead code, no defensive
+  checks for states the design already rules out.
+- One idea per line/block: if a helper, test, or comment does not earn
+  its place, remove it instead of keeping it "just in case".
+
 ## No gold plating
 
 - Implement exactly what was asked. Do not add extra features, configs,

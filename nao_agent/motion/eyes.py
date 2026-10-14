@@ -14,6 +14,9 @@ import time
 EYES_SERVICE = "/nao_agent/set_eyes"
 
 THINKING_MODE = "thinking"
+LISTENING_MODE = "listening"
+# Turquoise marker while listening (same hue the old nao-agent used).
+TURQUOISE_HEX = 0x0000FFFF
 TICK_SEC = 0.1
 FACE_LEDS_COUNT = 8
 LED_INTENSITIES = (1.0, 0.6, 0.2, 0.0)
@@ -41,11 +44,12 @@ class Eyes:
     def set(self, mode) -> bool:
         """Switch animation mode; empty/None stops and restores full LEDs."""
         mode = (mode or "").strip() or None
-        if mode is not None and mode != THINKING_MODE:
+        if mode is not None and mode not in (THINKING_MODE, LISTENING_MODE):
             return False
         with self._lock:
             self._mode = mode
             self._step = 0
+            self._applied = False
             if mode is not None and (
                 self._thread is None or not self._thread.is_alive()
             ):
@@ -67,15 +71,27 @@ class Eyes:
     def _loop(self) -> None:
         while True:
             with self._lock:
-                if self._mode != THINKING_MODE:
+                mode = self._mode
+                if mode is None:
                     return
-                step = self._step
-                self._step += 1
+                if mode == THINKING_MODE:
+                    step = self._step
+                    self._step += 1
+                    listening = False
+                else:
+                    applied = self._applied
+                    self._applied = True
+                    listening = True
             try:
-                for i, intensity in enumerate(LED_INTENSITIES):
-                    self._leds.setIntensity(
-                        self._led_names[(step - i) % FACE_LEDS_COUNT], intensity
-                    )
+                if listening:
+                    # Solid marker, applied once (fade persists on its own).
+                    if not applied:
+                        self._leds.fadeRGB("FaceLeds", TURQUOISE_HEX, 0.5)
+                else:
+                    for i, intensity in enumerate(LED_INTENSITIES):
+                        self._leds.setIntensity(
+                            self._led_names[(step - i) % FACE_LEDS_COUNT], intensity
+                        )
             except Exception as e:  # noqa: BLE001 - keep animating through blips
                 if self._on_error is not None and not self._error_logged:
                     self._error_logged = True

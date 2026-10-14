@@ -21,7 +21,7 @@ import time
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 from nao_agent.llm.chat_client import ChatClient
 from nao_agent.llm.prompts import build_messages, clip_text
@@ -53,6 +53,9 @@ class ChatBridgeNode(Node):
         # server's eye service; best effort, never blocks the flow).
         self.declare_parameter("thinking_eyes", True)
         self.declare_parameter("eyes_service", EYES_SERVICE)
+        # Busy flag for the STT feeder (default namespace topic): true while
+        # a prompt is being processed, so the feeder pauses listening.
+        self.declare_parameter("busy_topic", "/agent/busy")
         # Conversation memory (in-process only, restart clears it):
         # last `history_turns` exchanges, each message clipped to
         # `history_msg_chars` so one long prompt cannot evict the
@@ -100,6 +103,10 @@ class ChatBridgeNode(Node):
 
         self._lock = threading.Lock()
         self._busy = False
+        self._busy_pub = self.create_publisher(
+            Bool, self.get_parameter("busy_topic").value, 10
+        )
+        self._publish_busy(False)
 
         self.create_subscription(String, prompt_topic, self._on_prompt, 10)
         self.get_logger().info(
@@ -116,6 +123,7 @@ class ChatBridgeNode(Node):
                 self.get_logger().warn("LLM busy, dropping prompt (single-flight)")
                 return
             self._busy = True
+        self._publish_busy(True)
 
         self.get_logger().info(f"Prompt: {text[:120]}")
         clipped = clip_text(text, self._history_chars)
@@ -286,10 +294,16 @@ class ChatBridgeNode(Node):
         except Exception:  # noqa: BLE001 - eyes are best effort
             pass
 
+    def _publish_busy(self, busy: bool) -> None:
+        msg = Bool()
+        msg.data = bool(busy)
+        self._busy_pub.publish(msg)
+
     def _release(self) -> None:
         self._think(False)
         with self._lock:
             self._busy = False
+        self._publish_busy(False)
 
     def _drop_turn(self) -> None:
         """Discard a failed turn: forget the pending prompt, stay idle."""
@@ -297,6 +311,7 @@ class ChatBridgeNode(Node):
         with self._lock:
             self._pending_user = None
             self._busy = False
+        self._publish_busy(False)
 
 
 def main(args=None) -> None:

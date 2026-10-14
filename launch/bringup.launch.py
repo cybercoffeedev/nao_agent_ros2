@@ -1,4 +1,4 @@
-"""System composition: naoqi_driver + llama_ros + chat_bridge."""
+"""System composition: naoqi_driver + llama_ros + whisper_ros + agent nodes."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -15,6 +15,9 @@ def generate_launch_description():
     # Single config for the whole stack: `chat_bridge_node:` section feeds
     # the bridge, `/**:` block feeds llama_node.
     params_file = LaunchConfiguration("params_file")
+    # Whisper has its own yaml (no `/**:` block: that would shadow its
+    # `model.*` keys, see config/whisper.yaml).
+    whisper_params_file = LaunchConfiguration("whisper_params_file")
 
     naoqi_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -59,6 +62,30 @@ def generate_launch_description():
         parameters=[params_file, {"nao_ip": nao_ip, "nao_port": nao_port}],
     )
 
+    whisper_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory("whisper_bringup"),
+                "launch",
+                "whisper.launch.py",
+            )
+        ),
+        launch_arguments={
+            "whisper_params_file": whisper_params_file,
+            "silero_vad_params_file": whisper_params_file,
+            # No host-mic capturer: audio comes from the NAO driver.
+            "launch_audio_capturer": "False",
+        }.items(),
+    )
+
+    feeder = Node(
+        package="nao_agent",
+        executable="stt_feeder_node",
+        name="stt_feeder_node",
+        output="screen",
+        parameters=[params_file],
+    )
+
     return LaunchDescription(
         [
             DeclareLaunchArgument("nao_ip", default_value="127.0.0.1"),
@@ -71,9 +98,19 @@ def generate_launch_description():
                     "params.yaml",
                 ),
             ),
+            DeclareLaunchArgument(
+                "whisper_params_file",
+                default_value=os.path.join(
+                    get_package_share_directory("nao_agent"),
+                    "config",
+                    "whisper.yaml",
+                ),
+            ),
             naoqi_launch,
             llama_launch,
             bridge,
             motion,
+            whisper_launch,
+            feeder,
         ]
     )

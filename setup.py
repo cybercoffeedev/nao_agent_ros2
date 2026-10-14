@@ -11,6 +11,7 @@ setup (
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/bringup.launch.py']),
         ('share/' + package_name + '/config', ['config/params.yaml']),
+        ('share/' + package_name + '/config', ['config/whisper.yaml']),
         ('share/' + package_name + '/config/grammar', ['config/grammar/response.json']),
     ],
     install_requires=['setuptools'],
@@ -26,6 +27,7 @@ setup (
         'console_scripts': [
             'chat_bridge_node = nao_agent.chat_bridge_node:main',
             'motion_server_node = nao_agent.motion.server:main',
+            'stt_feeder_node = nao_agent.stt.feeder:main',
         ],
     },
 )

@@ -37,6 +37,7 @@
         // Agent tooling state (named volumes; ownership fixed in setup).
         "source=opencode-config,target=/home/ros2dev/.config/opencode,type=volume",
         "source=opencode-data,target=/home/ros2dev/.local/share/opencode,type=volume",
+        "source=opencode-cache,target=/home/ros2dev/.cache/opencode,type=volume",
         // Caches surviving rebuilds: apt archives, colcon outputs,
         // HuggingFace model weights (llama_ros downloads via hf_hub).
         // Wipe after a base-image bump if builds misbehave.

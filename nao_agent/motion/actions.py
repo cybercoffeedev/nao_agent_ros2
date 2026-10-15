@@ -55,50 +55,70 @@ class PostureActions:
         self._svc = get_service
 
     def _go_to_posture(
-        self, preset: str, family: str, restore_autonomy: bool
+        self, preset: str, family: str
     ) -> str:
         posture = self._svc("ALRobotPosture")
         if posture.getPostureFamily() == family:
             return f"Already in {family}."
+        # Leave autonomous movements off after the motion: re-enabling
+        # them lets the robot's native eye/gesture writers fight ours
+        # (turquoise listening eyes, extra gestures, self-talk motion).
         self._set_autonomy(False)
         try:
             ok = posture.goToPosture(preset, POSTURE_SPEED)
         finally:
-            self._set_autonomy(restore_autonomy)
+            self._set_idle()
         if not ok:
             raise MotionError(f"{preset} failed")
         return f"{preset}: done"
 
-    def _set_autonomy(self, enabled: bool) -> None:
-        for name in (
-            "ALBackgroundMovement",
-            "ALListeningMovement",
-            "ALBasicAwareness",
-        ):
+    def _set_services(self, states) -> None:
+        for name, enabled in states:
             try:
                 self._svc(name).setEnabled(enabled)
             except Exception:  # noqa: BLE001 - best effort, may not exist in sim
                 continue
 
+    def _set_autonomy(self, enabled: bool) -> None:
+        self._set_services(
+            (
+                ("ALBackgroundMovement", enabled),
+                ("ALListeningMovement", enabled),
+                ("ALBasicAwareness", enabled),
+            )
+        )
+
+    def _set_idle(self) -> None:
+        # After our motion: back only the harmless sway. Listening and
+        # awareness stay off — their native eye/gesture writers (turquoise
+        # listening eyes, unprompted gestures) fight our stack.
+        self._set_services(
+            (
+                ("ALBackgroundMovement", True),
+                ("ALListeningMovement", False),
+                ("ALBasicAwareness", False),
+            )
+        )
+
     @action("sit down")
     def sit_down(self) -> str:
         """Make the robot sit down."""
-        return self._go_to_posture("Sit", "Sitting", True)
+        return self._go_to_posture("Sit", "Sitting")
 
     @action("stand up")
     def stand_up(self) -> str:
         """Make the robot stand up."""
-        return self._go_to_posture("StandInit", "Standing", True)
+        return self._go_to_posture("StandInit", "Standing")
 
     @action("lie on stomach")
     def lie_on_stomach(self) -> str:
         """Make the robot lie on its stomach."""
-        return self._go_to_posture("LyingBelly", "LyingBelly", False)
+        return self._go_to_posture("LyingBelly", "LyingBelly")
 
     @action("lie on back")
     def lie_on_back(self) -> str:
         """Make the robot lie on its back."""
-        return self._go_to_posture("LyingBack", "LyingBack", False)
+        return self._go_to_posture("LyingBack", "LyingBack")
 
     @action("wave the right hand in greeting")
     def wave_right_hand(self) -> str:

@@ -87,3 +87,15 @@ def test_loop_reports_first_write_error_once():
     assert eyes.set("") is True
     assert len(errors) == 1
     assert "nope" in errors[0]
+
+
+def test_error_latch_resets_per_run():
+    errors = []
+    eyes = Eyes(FailingLeds(), on_error=errors.append)
+    eyes.set("thinking")
+    time.sleep(0.25)
+    eyes.set("")
+    eyes.set("thinking")
+    time.sleep(0.25)
+    eyes.set("")
+    assert len(errors) == 2

@@ -35,16 +35,33 @@ class FakeMotion:
         return True
 
 
+class FakeMovement:
+    def __init__(self):
+        self.calls = []
+
+    def setEnabled(self, value):
+        self.calls.append(bool(value))
+
+
 class FakeSession:
     def __init__(self, posture=None, motion=None):
         self.posture = posture or FakePosture()
         self.motion = motion or FakeMotion()
+        self.background = FakeMovement()
+        self.listening = FakeMovement()
+        self.awareness = FakeMovement()
 
     def service(self, name):
         if name == "ALRobotPosture":
             return self.posture
         if name == "ALMotion":
             return self.motion
+        if name == "ALBackgroundMovement":
+            return self.background
+        if name == "ALListeningMovement":
+            return self.listening
+        if name == "ALBasicAwareness":
+            return self.awareness
         raise RuntimeError(f"no such service: {name}")
 
 
@@ -122,3 +139,12 @@ def test_missing_posture_service_raises():
     executor = PostureExecutor(lambda: NoPosture())
     with pytest.raises(MotionError):
         executor.run("sit_down")
+
+
+def test_motion_leaves_only_background_sway():
+    session = FakeSession(FakePosture("Standing"))
+    executor = make_executor(session)
+    assert executor.run("sit_down") == "Sit: done"
+    assert session.background.calls == [False, True]
+    assert session.listening.calls == [False, False]
+    assert session.awareness.calls == [False, False]

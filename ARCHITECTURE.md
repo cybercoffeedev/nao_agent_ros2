@@ -81,8 +81,8 @@ One diagram for everything:
 
 ```mermaid
 flowchart LR
-    Dev[Developer / Test] -- "std_msgs/String" --> P((topic /prompt))
-    Launch[<b>bringup.launch.py</b>\n<i>launch</i>\nstarts nodes, passes params_file] -.-> Client
+    Dev([Developer / Test]) -- "std_msgs/String" --> P[(topic /prompt)]
+    Launch{{<b>bringup.launch.py</b>\n<i>launch</i>\nstarts nodes, passes params_file}} -.-> Client
     Launch -.-> Llama
     Launch -.-> Driver
     Launch -.-> Whisper
@@ -109,26 +109,31 @@ flowchart LR
     end
 
     P --> Client
-    Client -- "GenerateChatCompletions and grammar actions" --> Llama{<b>llama_node</b>\nllama_ros}
+    Client -- "GenerateChatCompletions and grammar actions" --> Llama[[<b>llama_node</b>\nllama_ros]]
     Llama -- "JSON steps" --> Client
-    Speaker -- "speak text only" --> S((topic /speech))
-    S --> Driver{<b>naoqi_driver_node</b>\nnaoqi_driver2}
-    Driver -- "say text" --> TTS[ALTextToSpeech]
+    Speaker -- "speak text only" --> S[(topic /speech)]
+    S --> Driver[[<b>naoqi_driver_node</b>\nnaoqi_driver2]]
+    Driver -- "say text" --> TTS[[ALTextToSpeech]]
     TTS -. "TextDone event" .-> Done[<b>speech_done_node</b>\n<i>speech/monitor.py</i>\nown qi session]
     Done -- "/speech_done, exact gate close" --> Gate
     Driver -- "AudioBuffer /audio (48 kHz 4ch mics)" --> Shape
-    Shape -- "AudioStamped /audio/in (mono 16 kHz)" --> Whisper{<b>whisper + silero</b>\nwhisper_ros}
+    Shape -- "AudioStamped /audio/in (mono 16 kHz)" --> Whisper[[<b>whisper + silero</b>\nwhisper_ros]]
     Loop -- "STT goal /whisper/listen (one utterance)" --> Whisper
     Whisper -- "Transcription text" --> Loop
     Loop -- "/prompt, dropped while /speech may play" --> P
     S -. "inhibit window per utterance" .-> Gate
-    Bridge -- "busy flag" --> B((topic /agent/busy))
+    Bridge -- "busy flag" --> B[(topic /agent/busy)]
     B -. "pause listen goals" .-> Loop
-    SvcClient -- "SetString service /nao_agent/go_to_posture" --> MotionSvc{<b>motion_server_node</b>\n<i>server.py and posture_executor.py</i>\nservice front, guard, dispatch}
+    SvcClient -- "SetString service /nao_agent/go_to_posture" --> MotionSvc[<b>motion_server_node</b>\n<i>server.py and posture_executor.py</i>\nservice front, guard, dispatch]
     SvcClient -. "SetString /nao_agent/set_eyes (thinking on/off)" .-> MotionSvc
-    MotionSvc -- "goToPosture and angleInterpolation, own qi session" --> Motion[ALRobotPosture and ALMotion]
-    MotionSvc -- "FaceLeds comet, own qi session" --> Eyes[ALLeds]
+    MotionSvc -- "goToPosture and angleInterpolation, own qi session" --> Motion[[ALRobotPosture and ALMotion]]
+    MotionSvc -- "FaceLeds comet, own qi session" --> Eyes[[ALLeds]]
     Handlers -. "handlers run inside server" .-> MotionSvc
+
+    subgraph Legend [<b>Legend</b>]
+        direction LR
+        LExt[[external system]] --- LData[(topic / data store)] --- LPrep{{launch / preparation}} --- LNode[our node / step] --- LActor([actor])
+    end
 ```
 
 Data flow: a test prompt injected on `/prompt` is wrapped into

@@ -22,6 +22,11 @@
   composition.
 - If a request conflicts with `ARCHITECTURE.md`, keep the existing design
   and point out the conflict instead of silently diverging.
+- Mermaid diagram shapes are semantic (see the Legend in section 2):
+  `[[...]]` external systems, `[(...)]` topics/data stores, `{{...}}`
+  launch/preparation, `[...]` our nodes/steps, `([...])` actors,
+  `{...}` reserved for decisions. Keep new nodes inside the mapping and
+  extend the Legend instead of inventing shapes.
 
 ## Testing
 

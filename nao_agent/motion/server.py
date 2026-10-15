@@ -13,6 +13,7 @@ its proxies are used; a long motion briefly stalls other callbacks.
 import threading
 
 import rclpy
+from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 
@@ -30,9 +31,11 @@ class MotionServerNode(Node):
     def __init__(self) -> None:
         super().__init__("motion_server_node")
         self.declare_parameter("nao_ip", "127.0.0.1")
-        # Declared without a default on purpose: launch passes strings
-        # ("9559"), CLI passes ints (9559); both coerce below.
-        self.declare_parameter("nao_port")
+        # Untyped (dynamic) on purpose: launch passes strings ("9559"),
+        # CLI passes ints (9559); both coerce below.
+        self.declare_parameter(
+            "nao_port", descriptor=ParameterDescriptor(dynamic_typing=True)
+        )
         nao_ip = str(self.get_parameter("nao_ip").value)
         try:
             nao_port = int(self.get_parameter("nao_port").value)

@@ -149,8 +149,13 @@ class SttFeederNode(Node):
         if cancel is not None:
             # Free the server-side goal; the bridge overwrites the eyes
             # with thinking itself, so no eye call here (ordering race).
+            # NOTE: cancel goes through the goal handle; ActionClient has
+            # no cancel_goal_async (calling it kills this node).
             self.get_logger().debug("Bridge busy, cancelling listen goal")
-            self._stt.cancel_goal_async(cancel)
+            try:
+                cancel.cancel_goal_async()
+            except Exception as e:  # noqa: BLE001 - best effort
+                self.get_logger().debug(f"STT cancel failed: {e}")
         else:
             # Back to idle: listen again.
             self._send_listen()

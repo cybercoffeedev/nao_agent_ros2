@@ -2,6 +2,7 @@
 # - `chat_bridge_node:` -> our bridge (topics, action, prompt text, memory)
 # - `motion_server_node:` -> robot address for the motion qi session
 # - `stt_feeder_node:`  -> voice input (topics, action, echo-gate timing)
+# - `speech_done_node:` -> TextDone event topic (exact echo-gate close)
 # - `/**:`             -> llama_node (model, context, CPU, chat template)
 #   (`/**` applies to every node, so the model block works regardless of
 #   the namespace llama_node is launched in.)
@@ -34,6 +35,10 @@ motion_server_node:
     # launch values win).
     nao_ip: "127.0.0.1"
     nao_port: 9559
+
+speech_done_node:
+  ros__parameters:
+    done_topic: "/speech_done"
 
 stt_feeder_node:
   ros__parameters:

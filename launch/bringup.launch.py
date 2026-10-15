@@ -91,6 +91,14 @@ def generate_launch_description():
         parameters=[params_file],
     )
 
+    speech_done = Node(
+        package="nao_agent",
+        executable="speech_done_node",
+        name="speech_done_node",
+        output="screen",
+        parameters=[params_file, {"nao_ip": nao_ip, "nao_port": nao_port}],
+    )
+
     return LaunchDescription(
         [
             DeclareLaunchArgument("nao_ip", default_value="127.0.0.1"),
@@ -117,5 +125,6 @@ def generate_launch_description():
             motion,
             whisper_launch,
             feeder,
+            speech_done,
         ]
     )

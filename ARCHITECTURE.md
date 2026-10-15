@@ -26,14 +26,15 @@ It is a living document — update it as the codebase evolves.
 │   │   └── server.py         # ROS service fronts (posture + eyes)
 │   └── speech/               # Speech adapter layer (no LLM knowledge)
 │       ├── __init__.py
-│       └── speaker.py        # Adapter for /speech -> ALTextToSpeech
+│       ├── speaker.py        # Adapter for /speech -> ALTextToSpeech
+│       └── monitor.py        # TextDone event -> /speech_done (exact gate close)
 │   ├── stt/                  # Voice input (no LLM knowledge)
 │   │   ├── __init__.py
 │   │   ├── audio.py          # Pure AudioBuffer -> mono 16 kHz shaping
 │   │   ├── gate.py           # Pure echo-gate timing (deaf while speaking)
 │   │   └── feeder.py         # ROS node: audio forward + STT loop -> /prompt
 ├── config/
-│   ├── params.yaml           # Single config: bridge, motion, stt_feeder sections + `/**:` model block
+│   ├── params.yaml           # Single config: bridge, motion, stt_feeder, speech_done sections + `/**:` model block
 │   ├── whisper.yaml          # STT params (own file: `/**:` would shadow `model.*`)
 │   └── grammar/
 │       └── response.json     # JSON Schema compiled to GBNF (envelope shape)
@@ -113,6 +114,8 @@ flowchart LR
     Speaker -- "speak text only" --> S((topic /speech))
     S --> Driver{<b>naoqi_driver_node</b>\nnaoqi_driver2}
     Driver -- "say text" --> TTS[ALTextToSpeech]
+    TTS -. "TextDone event" .-> Done[<b>speech_done_node</b>\n<i>speech/monitor.py</i>\nown qi session]
+    Done -- "/speech_done, exact gate close" --> Gate
     Driver -- "AudioBuffer /audio (48 kHz 4ch mics)" --> Shape
     Shape -- "AudioStamped /audio/in (mono 16 kHz)" --> Whisper{<b>whisper + silero</b>\nwhisper_ros}
     Loop -- "STT goal /whisper/listen (one utterance)" --> Whisper
@@ -143,6 +146,9 @@ chains single-utterance `STT` goals (VAD-gated inside whisper_ros) and
 publishes each transcription on `/prompt` unless our own `/speech` may
 still be playing (half-duplex echo gate: the robot is deaf while it
 speaks, since its own TTS would otherwise be transcribed back).
+The gate closes exactly on the `ALTextToSpeech/TextDone` event
+(`/speech_done`, plus a short reverb tail); a per-utterance time window
+remains only as a fallback cap for a lost event.
 A transcription is also dropped when it holds only bracketed non-speech
 tags (hallucination filter); the echo check compares the recording
 window against the inhibit window, not just the result arrival time.
@@ -261,8 +267,17 @@ Name: `Speaker` (`nao_agent/speech/speaker.py`)
 
 Description: Publishes plain-text answers on the speech topic consumed by
 `naoqi_driver2`'s `SpeechSubscriber`. Skips empty responses with a warning.
+The same layer also hosts `speech_done_node` (`monitor.py`): it subscribes
+the `ALTextToSpeech/TextDone` ALMemory event over its own qi session and
+publishes one `std_msgs/Empty` per utterance end on `/speech_done`
+(hardware fires twice per utterance; only the truthy end-firing closes
+the gate), so the feeder
+closes the echo gate exactly when synthesis ends instead of guessing from
+a time window (any utterance length works). The session stays referenced
+while the subscriber lives; without the event (simulator, dropped link)
+it warns once and the feeder still gates on its time-window fallback cap.
 
-Technologies: Python, rclpy, std_msgs
+Technologies: Python, rclpy, libqi-python, std_msgs
 
 ### 3.7. STT feeder + audio shaping (voice input)
 
@@ -283,7 +298,9 @@ a transcription that still slips through is dropped at result time.
 Tuning lives in the `stt_feeder_node:` section of `config/params.yaml`
 (`sec_per_char: 0.10`, `gate_margin_sec: 5.0` — generous on purpose:
 physical TTS outlives the sequence end because the busy flag drops first,
-and any leaked tail self-prompts the robot into an answer loop).
+and any leaked tail self-prompts the robot into an answer loop;
+`done_topic`, `tail_margin_sec: 0.5`, `stuck_timeout_sec: 300.0` drive
+the exact close).
 A watchdog timer re-arms the goal after failures
 without stalling audio forwarding. Covered by `test/test_stt_audio.py`
 and `test/test_stt_gate.py` with no ROS.
@@ -296,7 +313,7 @@ Name: `bringup.launch.py`
 
 Description: Declares `nao_ip`, `nao_port`, `params_file`
 (default `config/params.yaml`, holding the `chat_bridge_node:`,
-`motion_server_node:`, `stt_feeder_node:` and `/**:` model blocks) and `whisper_params_file`
+`motion_server_node:`, `stt_feeder_node:`, `speech_done_node:` and `/**:` model blocks) and `whisper_params_file`
 (default `config/whisper.yaml`, holding the `/whisper/*` blocks — kept
 separate because `/**:` would shadow whisper's own `model.*` keys) and
 includes `naoqi_driver.launch.py`, `llama_bringup/base.launch.py` (with
@@ -306,8 +323,8 @@ declared by `naoqi_driver.launch.py` would silently push `llama_node`
 into `/naoqi_driver` instead of `/llama`),
 `whisper_bringup/whisper.launch.py` (same file as both whisper and
 silero params, host-mic capturer off: audio comes
-from the driver) plus the `chat_bridge_node`, `motion_server_node` and
-`stt_feeder_node`.
+from the driver) plus the `chat_bridge_node`, `motion_server_node`,
+`stt_feeder_node` and `speech_done_node`.
 
 Technologies: ROS 2 Launch (Python)
 
@@ -315,7 +332,7 @@ Technologies: ROS 2 Launch (Python)
 
 ### 4.1. ROS graph (transient transport)
 
-Name: Topics `/prompt`, `/speech`, `/audio`, `/audio/in`, `/agent/busy`; actions
+Name: Topics `/prompt`, `/speech`, `/speech_done`, `/audio`, `/audio/in`, `/agent/busy`; actions
 `generate_chat_completions`, `STT` (`/whisper/listen`);
 services `/nao_agent/go_to_posture`, `/nao_agent/set_eyes`
 
@@ -323,7 +340,8 @@ Type: ROS 2 DDS topics / actions (in-memory, no persistence)
 
 Purpose: `/prompt` carries user utterances (`std_msgs/String`, test
 injection or STT feeder output); `/speech` carries LLM answers to the
-driver; `/audio` carries mic buffers from the driver
+driver; `/speech_done` carries one `std_msgs/Empty` per finished
+utterance (`ALTextToSpeech/TextDone` via `speech_done_node`); `/audio` carries mic buffers from the driver
 (`naoqi_bridge_msgs/AudioBuffer`, published only while subscribed);
 `/audio/in` carries reshaped mono audio to silero
 (`audio_common_msgs/AudioStamped`, sensor-data QoS);
@@ -333,7 +351,7 @@ STT action carries one listen goal per utterance; the `/agent/busy` flag
 feeder's listen goals; the services carry
 motion goals and eye-mode switches (`naoqi_bridge_msgs/srv/SetString`).
 
-Key Schemas/Collections: `std_msgs/msg/String`, `std_msgs/msg/Bool`,
+Key Schemas/Collections: `std_msgs/msg/String`, `std_msgs/msg/Empty`, `std_msgs/msg/Bool`,
 `llama_msgs/action/GenerateChatCompletions`,
 `llama_msgs/msg/ChatMessage`,
 `whisper_msgs/action/STT`, `whisper_msgs/msg/Transcription`,
@@ -477,8 +495,9 @@ declared as test dependencies.
   behind a half-duplex echo gate (deaf while `/speech` may play). Hearing
   needs a physical robot (`naoqi-bin` has no mic input) plus a driver
   endpoint reachable from the robot, otherwise audio extraction silently
-  disables itself. Leftovers: `TextDone`-precise gating (today: time
-  window per utterance), VAD threshold tuning for fan/servo noise,
+  disables itself. The gate closes exactly on `TextDone` (`/speech_done`,
+  plus a reverb tail) with the time window as fallback cap. Leftovers:
+  VAD threshold tuning for fan/servo noise,
   barge-in (out of scope: no reference signal for AEC on NAO).
 - Multilingual support: parameterize the interaction language instead of
   the hardcoded Polish `system_prompt` (per-language prompt text with the
@@ -497,9 +516,9 @@ declared as test dependencies.
   phoneticized through the default voice on hardware) and fires `say()`
   fire-and-forget (overlapping utterances outrun the echo-gate timing
   estimate). Fork or patch it to set the `ALTextToSpeech` language per
-  interaction language and queue utterances. Until then the time-window
-  echo gate (`sec_per_char` + margin) is the only buffer — tune it, don't
-  assume exact speech timing.
+  interaction language and queue utterances. The time-window echo gate
+  is now only the fallback cap behind exact `TextDone` close — tune it,
+  don't assume exact speech timing.
 - VLA control (research track, last): once the agent is complete,
   experiments with a vision-language-action policy are planned in a
   separate repository (new ROS package in the same workspace, talking to

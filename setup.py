@@ -28,6 +28,7 @@ setup (
             'chat_bridge_node = nao_agent.chat_bridge_node:main',
             'motion_server_node = nao_agent.motion.server:main',
             'stt_feeder_node = nao_agent.stt.feeder:main',
+            'speech_done_node = nao_agent.speech.monitor:main',
         ],
     },
 )

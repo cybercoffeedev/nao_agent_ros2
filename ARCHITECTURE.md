@@ -440,6 +440,9 @@ animations), `NAO_IP` required via `.env` (`.env.example` committed,
 real `.env` gitignored — no robot IPs in git), restart
 `unless-stopped`. The baked `params.yaml` is the golden config;
 per-robot tuning goes through launch args, not a rebuilt image.
+GPU variant: `production-cuda.containerfile` / `production-cuda.compose.yml`
+(CUDA devel + `GGML_CUDA=ON`, GPU layer counts baked at build time,
+`deploy.resources` GPU reservation; host needs nvidia-container-toolkit).
 
 Monitoring & Logging: ROS 2 logging (`/rosout`); key observables are the
 `chat_bridge` prompt/LLM logs and `ros2 topic echo /speech`

@@ -232,7 +232,12 @@ stay referenced while its proxies are used; a long motion briefly stalls
 other callbacks).
 `PostureExecutor` underneath only guards (single writer on ALMotion) and
 dispatches registered `@action` handlers over its own qi session to the
-same robot (concurrent sessions are allowed). The bridge is a plain
+same robot (concurrent sessions are allowed). Deployment assumption: one
+stack per robot — a second writer (another agent, Choregraphe behavior)
+on ALMotion or FaceLeds interleaves motions and eye animations with ours.
+During our motions the native movement writers stay off; afterwards only
+the harmless background sway returns (listening and awareness stay off,
+so no native eye/gesture writer fights the stack). The bridge is a plain
 service client: it waits on the future (main thread keeps spinning) with
 a timeout, skips motion gracefully when the server is down, aborts the
 sequence on failure. Adding an action is one decorated method; the parser
@@ -275,7 +280,10 @@ reports our own `/speech` (recording-window overlap with the inhibit
 window, or still inhibited at result time). While the bridge reports busy
 on `/agent/busy` the feeder cancels its listen goal and sends nothing;
 a transcription that still slips through is dropped at result time.
-Tuning lives in the `stt_feeder_node:` section of `config/params.yaml`.
+Tuning lives in the `stt_feeder_node:` section of `config/params.yaml`
+(`sec_per_char: 0.10`, `gate_margin_sec: 5.0` — generous on purpose:
+physical TTS outlives the sequence end because the busy flag drops first,
+and any leaked tail self-prompts the robot into an answer loop).
 A watchdog timer re-arms the goal after failures
 without stalling audio forwarding. Covered by `test/test_stt_audio.py`
 and `test/test_stt_gate.py` with no ROS.
@@ -291,7 +299,11 @@ Description: Declares `nao_ip`, `nao_port`, `params_file`
 `motion_server_node:`, `stt_feeder_node:` and `/**:` model blocks) and `whisper_params_file`
 (default `config/whisper.yaml`, holding the `/whisper/*` blocks — kept
 separate because `/**:` would shadow whisper's own `model.*` keys) and
-includes `naoqi_driver.launch.py`, `llama_bringup/base.launch.py`,
+includes `naoqi_driver.launch.py`, `llama_bringup/base.launch.py` (with
+an explicit `namespace: llama` pin — launch configurations are
+context-global, first declaration wins, so without it the `namespace` arg
+declared by `naoqi_driver.launch.py` would silently push `llama_node`
+into `/naoqi_driver` instead of `/llama`),
 `whisper_bringup/whisper.launch.py` (same file as both whisper and
 silero params, host-mic capturer off: audio comes
 from the driver) plus the `chat_bridge_node`, `motion_server_node` and

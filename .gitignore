@@ -6,3 +6,6 @@ log/
 .pytest_cache/
 .vscode/*
 !.vscode/launch.json
+
+# Production secrets/targets (robot IP lives here, never in git).
+.devops/.env

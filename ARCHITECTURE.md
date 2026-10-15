@@ -428,6 +428,19 @@ bridge still talks, motion actions just fail with a clear log.
 
 CI/CD Pipeline: None yet (manual `colcon build --packages-select nao_agent`)
 
+Production deployment (`.devops/`, no robot needed to review):
+`production.compose.yml` (validate with `docker compose --project-directory .devops config`)
+runs one prebuilt image (`production.containerfile`: qi wheel + workspace
+build; siblings from `dependencies.repos`, weights downloaded at first
+boot into named volumes). Rules: `network_mode: host` (the robot calls
+back into the driver audio endpoint; bridged networking silently disables
+audio extraction, and DDS multicast expects a flat network), exactly one
+stack per robot IP (a second writer interleaves motions and eye
+animations), `NAO_IP` required via `.env` (`.env.example` committed,
+real `.env` gitignored — no robot IPs in git), restart
+`unless-stopped`. The baked `params.yaml` is the golden config;
+per-robot tuning goes through launch args, not a rebuilt image.
+
 Monitoring & Logging: ROS 2 logging (`/rosout`); key observables are the
 `chat_bridge` prompt/LLM logs and `ros2 topic echo /speech`
 

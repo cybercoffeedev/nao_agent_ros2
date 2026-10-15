@@ -1,0 +1,49 @@
+# Production composition for nao_agent_ros2 (phase 1: prebuilt image).
+#
+#   cp .env.example .env   # fill in NAO_IP, never commit .env
+#   docker compose -f .devops/production.compose.yml --project-directory .devops up -d --build
+#   docker compose -f .devops/production.compose.yml --project-directory .devops config  # dry-run render
+#
+# Deployment rules (learned the hard way):
+# - host network: the robot calls BACK into the driver (audio endpoint);
+#   bridged networking silently disables audio extraction. DDS multicast
+#   also expects a flat network.
+# - exactly ONE stack per robot IP. A second writer (stale container with
+#   `restart: unless-stopped`, Choregraphe behavior) interleaves motions
+#   and eye animations with ours and is miserable to debug.
+# - NAO_IP has no default: compose fails fast with the message below
+#   instead of connecting into the void. Dev/sim default (127.0.0.1)
+#   lives only in bringup.launch.py / params.yaml.
+
+services:
+  nao_stack:
+    build:
+      # Builder recreates siblings from dependencies.repos, so the context
+      # is this repo alone (no host workspace needed).
+      context: ..
+      dockerfile: .devops/production.containerfile
+    image: nao_agent:prod
+    container_name: nao_agent_prod
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    command: >
+      ros2 launch nao_agent bringup.launch.py
+      nao_ip:=${NAO_IP:?set NAO_IP in .devops/.env}
+      nao_port:=${NAO_PORT:-9559}
+    volumes:
+      # Model weights and HF caches survive redeploys (no redownloads).
+      - hf-cache:/root/.cache/huggingface
+      - whisper-models:/root/.cache/whisper
+      - ros-logs:/root/.ros/log
+    stop_grace_period: 30s
+
+volumes:
+  hf-cache:
+  whisper-models:
+  ros-logs:

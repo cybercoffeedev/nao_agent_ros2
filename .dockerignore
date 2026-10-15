@@ -1,0 +1,9 @@
+# Keep the build context to this repo's sources (context root = repo).
+.git
+build/
+install/
+log/
+__pycache__/
+.pytest_cache/
+*.pyc
+.vscode/

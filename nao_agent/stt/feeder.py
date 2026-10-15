@@ -21,7 +21,7 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, QoSPresetProfiles, ReliabilityPolicy
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Empty, String
 
 from audio_common_msgs.msg import AudioStamped
 from naoqi_bridge_msgs.msg import AudioBuffer
@@ -31,10 +31,9 @@ from whisper_msgs.action import STT
 from nao_agent.motion.eyes import EYES_SERVICE
 from nao_agent.stt.audio import TARGET_RATE, shape_for_stt
 from nao_agent.stt.gate import (
+    SpeechTracker,
     capture_window,
-    inhibit_until,
     is_hallucination,
-    is_inhibited,
     overlaps,
 )
 
@@ -55,6 +54,13 @@ class SttFeederNode(Node):
         self.declare_parameter("eyes_service", EYES_SERVICE)
         self.declare_parameter("sec_per_char", 0.08)
         self.declare_parameter("gate_margin_sec", 2.0)
+        # Exact gate close (TextDone) plus reverb tail; the window above
+        # stays as the fallback cap for a lost done-event.
+        self.declare_parameter("done_topic", "/speech_done")
+        self.declare_parameter("tail_margin_sec", 0.5)
+        # Lost done-events must not deafen forever: past this silence the
+        # in-flight count reaps (long utterances below it are unaffected).
+        self.declare_parameter("stuck_timeout_sec", 300.0)
         self.declare_parameter("server_wait_sec", 5.0)
         self.declare_parameter("retry_sec", 2.0)
 
@@ -65,8 +71,13 @@ class SttFeederNode(Node):
         speech_topic = self.get_parameter("speech_topic").value
         busy_topic = self.get_parameter("busy_topic").value
         eyes_service = self.get_parameter("eyes_service").value
-        self._sec_per_char = float(self.get_parameter("sec_per_char").value)
-        self._margin = float(self.get_parameter("gate_margin_sec").value)
+        done_topic = self.get_parameter("done_topic").value
+        self._tracker = SpeechTracker(
+            self.get_parameter("sec_per_char").value,
+            self.get_parameter("gate_margin_sec").value,
+            self.get_parameter("tail_margin_sec").value,
+            self.get_parameter("stuck_timeout_sec").value,
+        )
         self._server_wait = float(self.get_parameter("server_wait_sec").value)
         self._retry_sec = float(self.get_parameter("retry_sec").value)
 
@@ -85,6 +96,7 @@ class SttFeederNode(Node):
         self._pub_prompt = self.create_publisher(String, self._prompt_topic, 10)
         self.create_subscription(AudioBuffer, audio_topic, self._on_audio, 10)
         self.create_subscription(String, speech_topic, self._on_speech, 10)
+        self.create_subscription(Empty, done_topic, self._on_done, 10)
         # Latched to match the bridge publisher: a (re)start mid-inference
         # still sees the current busy state.
         latched = QoSProfile(
@@ -129,10 +141,13 @@ class SttFeederNode(Node):
     def _on_speech(self, msg: String) -> None:
         now = self._now()
         with self._lock:
-            self._inhibit_start = now
-            self._inhibit_until = inhibit_until(
-                now, msg.data, self._sec_per_char, self._margin
+            self._inhibit_start, self._inhibit_until = self._tracker.on_speak(
+                now, msg.data
             )
+
+    def _on_done(self, msg: Empty) -> None:
+        with self._lock:
+            self._tracker.on_done(self._now())
 
     def _on_busy(self, msg: Bool) -> None:
         busy = bool(msg.data)
@@ -223,7 +238,7 @@ class SttFeederNode(Node):
             # alone arriving later proves nothing: VAD may have cut TTS).
             echo = overlaps(
                 start, end, self._inhibit_start, self._inhibit_until
-            ) or is_inhibited(now, self._inhibit_until)
+            ) or self._tracker.inhibited(now)
         if not text:
             self.get_logger().debug("STT returned empty text, listening on")
         elif is_hallucination(text):

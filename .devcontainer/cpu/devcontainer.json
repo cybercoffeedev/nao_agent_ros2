@@ -1,0 +1,25 @@
+{
+    "name": "nao_agent_ros2 (CPU)",
+    // Plain runtime, works everywhere. For NVIDIA GPU inference use the
+    // sibling CUDA config instead (pick at Reopen in Container).
+    "dockerComposeFile": [
+        "../devcontainer.compose.yml"
+    ],
+    "service": "dev",
+    "shutdownAction": "stopCompose",
+    "remoteUser": "ros2dev",
+    "workspaceFolder": "/home/ws/src/nao_agent_ros2",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "Ranch-Hand-Robotics.rde-ros-2",
+                "ms-python.python",
+                "ms-python.debugpy",
+                "redhat.vscode-xml",
+                "bierner.markdown-mermaid"
+            ]
+        }
+    },
+    "postCreateCommand": "bash .devcontainer/setup-workspace.sh",
+    "postStartCommand": "bash .devcontainer/start-sim.sh"
+}

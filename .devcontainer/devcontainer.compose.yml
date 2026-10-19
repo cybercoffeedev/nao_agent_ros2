@@ -1,0 +1,88 @@
+# Dev container composition: two services sharing one base via anchors —
+# `dev` (CPU, default, works everywhere) and `dev-cuda` (GPU passthrough,
+# needs the NVIDIA Container Toolkit on the host). The service is picked
+# with `"service"` in devcontainer.json. The workspace bind lives here
+# (`..` is the repo root: this file sits in `.devcontainer/`), because
+# `workspaceMount` is not allowed together with `dockerComposeFile`.
+# Shared blocks (extension fields, ignored by compose itself).
+x-build: &dev-build
+  context: .
+  dockerfile: devcontainer.containerfile
+  args:
+    USERNAME: ros2dev
+    ROS_DISTRO: jazzy
+
+x-volumes: &dev-volumes
+  # Workspace bind (replaces `workspaceMount` from devcontainer.json).
+  - ..:/home/ws/src/nao_agent_ros2:cached
+  # GUI forwarding for rviz/Choregraphe.
+  - /tmp/.X11-unix:/tmp/.X11-unix:cached
+  - /dev/dri:/dev/dri:cached
+  # Agent tooling state (ownership fixed in setup-workspace.sh).
+  - opencode-config:/home/ros2dev/.config/opencode
+  - opencode-data:/home/ros2dev/.local/share/opencode
+  - opencode-cache:/home/ros2dev/.cache/opencode
+  # Caches surviving rebuilds: apt archives, colcon outputs,
+  # HuggingFace model weights (llama_ros downloads via hf_hub).
+  # Wipe after a base-image bump if builds misbehave.
+  - nao-agent-apt-cache:/var/cache/apt
+  - nao-agent-hf-cache:/home/ros2dev/.cache/huggingface
+  - nao-agent-ws-build:/home/ws/build
+  - nao-agent-ws-install:/home/ws/install
+  - nao-agent-ws-log:/home/ws/log
+  # Pinned dependency checkouts (versions in dependencies.repos).
+  # Persisted so clones and rebuilds happen once; update with
+  # git pull inside, or drop the volume for a fresh clone.
+  - nao-agent-src-llama:/home/ws/src/llama_ros
+  - nao-agent-src-driver:/home/ws/src/naoqi_driver2
+
+x-environment: &dev-environment
+  DISPLAY: ${DISPLAY:-:0}
+  ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+  ROS_DOMAIN_ID: 42
+
+services:
+  # CPU default: plain runtime, no host requirements beyond Docker.
+  # Pinned to the lean `dev` stage (the file's last stage is `cuda`,
+  # which would otherwise become the default build target).
+  dev:
+    build: *dev-build
+    volumes: *dev-volumes
+    environment: *dev-environment
+    network_mode: host
+    stdin_open: true
+    tty: true
+  # CUDA variant: same workspace, plus GPU passthrough. Rebuild the
+  # workspace with CUDA backends (`colcon build --cmake-args
+  # -DGGML_CUDA=ON`, plus `-DONNX_GPU=ON` for whisper_ros Silero) and
+  # offload layers via `gpu.n_gpu_layers` (llama_ros README). The image
+  # itself stays CUDA-toolkit-free.
+  dev-cuda:
+    build: *dev-build
+    volumes: *dev-volumes
+    environment:
+      <<: *dev-environment
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    stdin_open: true
+    tty: true
+
+volumes:
+  opencode-config:
+  opencode-data:
+  opencode-cache:
+  nao-agent-apt-cache:
+  nao-agent-hf-cache:
+  nao-agent-ws-build:
+  nao-agent-ws-install:
+  nao-agent-ws-log:
+  nao-agent-src-llama:
+  nao-agent-src-driver:

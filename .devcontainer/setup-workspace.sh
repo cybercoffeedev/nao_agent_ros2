@@ -21,7 +21,13 @@ sudo install -d -o "$(whoami)" -g "$(whoami)" \
     /home/ros2dev/.cache/huggingface
 # The bind mount only covers this package; the parents are daemon-created
 # root-owned, so claim them before vcs/colcon write next to us.
-sudo install -d -o "$(whoami)" -g "$(whoami)" "$WS" "$WS/src"
+# Named volumes (build/install/log + pinned checkouts) also start
+# root-owned and are separate mounts — chowning the parent is not enough,
+# each mountpoint must be claimed explicitly.
+sudo install -d -o "$(whoami)" -g "$(whoami)" \
+    "$WS" "$WS/src" \
+    "$WS/build" "$WS/install" "$WS/log" \
+    "$WS/src/llama_ros" "$WS/src/naoqi_driver2"
 if [ -d "$WS/src/llama_ros/.git" ] && [ -d "$WS/src/whisper_ros/.git" ] \
     && [ -d "$WS/src/audio_common/.git" ] && [ -d "$WS/src/naoqi_driver2/.git" ]; then
     echo "siblings present, skipping clone"

@@ -66,7 +66,16 @@ for d in build install log; do
         || echo "WARNING: $WS/$d is not a persistent volume, next create will rebuild from scratch"
 done
 cd "$WS"
-colcon build
+# CUDA backends only in images carrying nvcc (the `cuda` build stage):
+# llama.cpp gets GGML_CUDA, whisper_ros Silero gets ONNX_GPU. nvcc 12.0
+# predates the default gcc-13, so it compiles with gcc-12 as host.
+CMAKE_ARGS=""
+if command -v nvcc >/dev/null 2>&1; then
+    echo "nvcc found, enabling CUDA backends"
+    CMAKE_ARGS="--cmake-args -DGGML_CUDA=ON -DONNX_GPU=ON -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/gcc-12"
+fi
+# shellcheck disable=SC2086 (intentional word splitting of CMAKE_ARGS)
+colcon build $CMAKE_ARGS
 
 echo "OK. Next: source install/setup.bash"
 echo "Motion test: python3 -c \"import qi\" must print nothing (no error)."

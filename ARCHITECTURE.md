@@ -50,9 +50,11 @@ It is a living document — update it as the codebase evolves.
 │   └── test_stt_gate.py      # pytest matrix for the echo-gate timing
 ├── resource/nao_agent        # ament package marker (do not touch)
 ├── .devcontainer/            # reproducible dev container (own workspace bootstrap)
-│   ├── devcontainer.json     # mounts this repo at /home/ws/src/nao_agent_ros2
-│   ├── devcontainer.containerfile # ROS Jazzy + choregraphe + tooling image
-│   ├── setup-workspace.sh    # siblings, rosdep, full build (wheel pre-baked)
+│   ├── cpu/devcontainer.json   # CPU variant (service `dev`); pick at Reopen in Container
+│   ├── cuda/devcontainer.json  # CUDA variant (service `dev-cuda`, NVIDIA Toolkit on host)
+│   ├── devcontainer.compose.yml # services dev/dev-cuda (build targets dev/cuda): workspace bind, volumes, env, net, GPU
+│   ├── devcontainer.containerfile # ROS Jazzy + choregraphe + tooling image; `cuda` stage adds the CUDA toolkit
+│   ├── setup-workspace.sh    # siblings, rosdep, full build (wheel pre-baked; CUDA backends auto-enabled when nvcc is present)
 │   ├── start-sim.sh          # autostart naoqi-bin, pins NAO V6 robot model
 │   └── bin/choregraphe       # one-word GUI launcher (needs forwarded X11)
 ├── dependencies.repos        # vcstool sources: naoqi_driver2, llama_ros, whisper_ros, audio_common
@@ -460,9 +462,23 @@ ros2 launch nao_agent bringup.launch.py nao_ip:=127.0.0.1 nao_port:=9559
 Fresh machine: clone only this repo, reopen it in VS Code dev container
 (`.devcontainer/`). First create recreates `/home/ws/src` (sibling
 checkouts via `dependencies.repos`), installs rosdep deps and builds the
-full workspace — long one time, skips on rebuilds. Sibling checkouts, apt
+full workspace — long one time, skips on rebuilds. Runtime config lives
+in `devcontainer.compose.yml`: two services (`dev` for CPU, `dev-cuda`
+for GPU passthrough) sharing one base — workspace bind, volumes, env,
+host network. VS Code offers both variants at Reopen in Container
+(`.devcontainer/cpu/` vs `.devcontainer/cuda/`); the only difference
+between the two `devcontainer.json` files is the picked service.
+Sibling checkouts, apt
 archives and colcon outputs live on named volumes; update pinned deps
-with `git pull` inside `src/<repo>`. Container autostart (postStart):
+with `git pull` inside `src/<repo>`. CUDA (`dev-cuda`, needs the NVIDIA
+Container Toolkit on the host): the image's `cuda` build stage carries
+the CUDA toolkit and the first-create bootstrap builds the workspace
+with CUDA backends automatically (`-DGGML_CUDA=ON`, plus `-DONNX_GPU=ON`
+for whisper_ros Silero; nvcc compiles with gcc-12 as host compiler).
+Only layer offload stays manual: `gpu.n_gpu_layers` in
+`config/params.yaml` (llama_ros README). The CPU image (`dev`) is built
+from the lean `dev` stage, so its binaries never require CUDA runtime
+libs. Container autostart (postStart):
 naoqi-bin simulator with NAO V6 identity (robot model pinned to
 `NAOH25V60.xml`, so Choregraphe opens a NAO, not a Pepper);
 Choregraphe via the `choregraphe`

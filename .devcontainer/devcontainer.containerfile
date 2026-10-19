@@ -58,7 +58,7 @@ RUN auditwheel repair \
 ARG ROS_DISTRO=jazzy
 # NOTE: tag hardcoded (not ${ROS_DISTRO}) — devcontainer CLIs pre-pull the
 # base image without substituting Dockerfile ARG defaults (podman).
-FROM docker.io/osrf/ros:jazzy-desktop-full
+FROM docker.io/osrf/ros:jazzy-desktop-full AS dev
 # Re-declare (again): pre-FROM ARGs are invisible to RUN without this.
 ARG ROS_DISTRO=jazzy
 ARG USERNAME=ros2dev
@@ -111,3 +111,19 @@ RUN echo "source /opt/ros/$ROS_DISTRO/setup.bash" >> /home/$USERNAME/.bashrc
 RUN echo '[ -f /home/ws/install/setup.bash ] && source /home/ws/install/setup.bash' >> /home/$USERNAME/.bashrc
 
 CMD ["/bin/bash"]
+
+# CUDA stage: dev plus the CUDA toolkit for GPU builds (dev-cuda
+# service). Separate stage so the CPU image stays lean and its binaries
+# never require CUDA runtime libs. The toolkit needs gcc-12 as the nvcc
+# host compiler (its 12.0 release predates the default gcc-13); the
+# workspace build passes it via -DCMAKE_CUDA_HOST_COMPILER (see
+# setup-workspace.sh).
+FROM dev AS cuda
+
+# NOTE: sudo (NOPASSWD for ros2dev, see above) — this stage inherits
+# USER ros2dev from dev, and there is no root shell here.
+RUN sudo apt-get update && sudo apt-get install -y \
+    nvidia-cuda-toolkit \
+    gcc-12 \
+    g++-12 \
+    && sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*

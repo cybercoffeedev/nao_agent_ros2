@@ -1,8 +1,8 @@
 {
     "name": "nao_agent_ros2 (CUDA)",
     // GPU passthrough via the `dev-cuda` compose service. Needs the NVIDIA
-    // Container Toolkit on the host. Rebuild the workspace with CUDA
-    // backends after first create (see ARCHITECTURE.md).
+    // Container Toolkit on the host; the image carries the CUDA toolkit and
+    // the first-create bootstrap enables the CUDA backends.
     "dockerComposeFile": [
         "../devcontainer.compose.yml"
     ],

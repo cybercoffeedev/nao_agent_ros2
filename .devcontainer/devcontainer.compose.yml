@@ -46,19 +46,24 @@ services:
   # Pinned to the lean `dev` stage (the file's last stage is `cuda`,
   # which would otherwise become the default build target).
   dev:
-    build: *dev-build
+    build:
+      <<: *dev-build
+      target: dev
     volumes: *dev-volumes
     environment: *dev-environment
     network_mode: host
     stdin_open: true
     tty: true
-  # CUDA variant: same workspace, plus GPU passthrough. Rebuild the
-  # workspace with CUDA backends (`colcon build --cmake-args
-  # -DGGML_CUDA=ON`, plus `-DONNX_GPU=ON` for whisper_ros Silero) and
-  # offload layers via `gpu.n_gpu_layers` (llama_ros README). The image
-  # itself stays CUDA-toolkit-free.
+  # CUDA variant: same workspace, plus GPU passthrough. Needs the NVIDIA
+  # Container Toolkit on the host. The image carries the CUDA toolkit
+  # (`cuda` build stage) and the first-create bootstrap builds the
+  # workspace with CUDA backends automatically (GGML_CUDA for llama.cpp,
+  # ONNX_GPU for whisper_ros Silero); only offload still needs a manual
+  # knob: `gpu.n_gpu_layers` in config/params.yaml (llama_ros README).
   dev-cuda:
-    build: *dev-build
+    build:
+      <<: *dev-build
+      target: cuda
     volumes: *dev-volumes
     environment:
       <<: *dev-environment

@@ -50,6 +50,9 @@ apt-config dump 2>/dev/null | grep -q 'Keep-Downloaded-Packages "true"' \
     || echo "WARNING: /var/cache/apt is not a persistent volume, downloads will repeat"
 sudo rosdep init 2>/dev/null || true
 rosdep update
+# The image wipes /var/lib/apt/lists at build end, so rosdep would see no
+# packages and fail on the first missing one.
+sudo apt-get update
 sudo rosdep install --from-paths "$WS/src" --ignore-src -y
 
 echo "==> 3/4 libqi-python wheel (motion backend, baked by the image)"

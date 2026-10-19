@@ -79,7 +79,7 @@ stt_feeder_node:
 
     # GPU / backend parameters
     gpu:
-      n_gpu_layers: 0
+      n_gpu_layers: 99
 
     # CPU parameters (tuned: 7B needs more than the upstream single thread)
     cpu:
